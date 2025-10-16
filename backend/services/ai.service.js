@@ -149,12 +149,12 @@ Response format example (respond with ONLY the JSON array):
 
       const chatCompletion = await groq.chat.completions.create({
         messages: [{ role: "user", content: prompt }],
-        model: "llama-3.3-70b-versatile",
-        temperature: 0.5, // ✅ FIXED: Lower temperature
-        max_completion_tokens: 4096, // ✅ FIXED: Reduced tokens
-        top_p: 0.9, // ✅ FIXED: top_p must be between 0 and 1 (was 1.79!)
-        stream: false,
-        stop: null
+         model: "llama-3.3-70b-versatile",
+  temperature: 1,
+  max_completion_tokens: 1024,
+  top_p: 1,
+  stream: false,
+  stop: null
       });
 
       console.log('Received response from Groq');
