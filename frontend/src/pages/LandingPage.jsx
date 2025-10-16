@@ -405,7 +405,7 @@ const AuthModal = ({ isLoginMode, setIsLoginMode, onClose, onAuthSuccess }) => {
 
     try {
       const endpoint = isLoginMode ? 'login' : 'register';
-      const url = '${import.meta.env.VITE_URL}/api/auth/${endpoint}';
+      const url = `${import.meta.env.VITE_URL}/api/auth/${endpoint}`;
       
       const payload = isLoginMode 
         ? { username: formData.username, password: formData.password }

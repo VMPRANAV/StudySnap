@@ -50,7 +50,7 @@ const ProgressIndicator = ({ progress, step }) => {
     );
 };
 
-const FlashcardPage = ({ user }) => {
+const FlashcardPage = () => { // Remove user prop to be consistent
     const [prompt, setPrompt] = useState('Create 5 flashcards on the key definitions.');
     const [pdfFile, setPdfFile] = useState(null);
     const [fileName, setFileName] = useState('');
@@ -63,7 +63,18 @@ const FlashcardPage = ({ user }) => {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [view, setView] = useState('generate');
 
-    const backendUrl = '${import.meta.env.VITE_URL}/api/flashcards';
+    // Add authentication state like in QuizPage
+    const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+
+    const backendUrl = `${import.meta.env.VITE_URL}/api/flashcards`;
+
+    // Check authentication on component mount
+    useEffect(() => {
+        const token = localStorage.getItem('token');
+        setIsAuthenticated(!!token);
+        setIsCheckingAuth(false);
+    }, []);
 
     // Helper function to get auth headers
     const getAuthHeaders = () => {
@@ -232,6 +243,32 @@ const FlashcardPage = ({ user }) => {
         setCurrentIndex(0);
         setView('viewer');
     };
+
+    // Add authentication check like in QuizPage
+    if (isCheckingAuth) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="text-white">Checking authentication...</div>
+            </div>
+        );
+    }
+
+    if (!isAuthenticated) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="bg-white/5 backdrop-blur-xl p-8 rounded-3xl border border-white/10 shadow-2xl text-center">
+                    <h2 className="text-2xl font-bold text-white mb-4">Authentication Required</h2>
+                    <p className="text-slate-300 mb-6">Please log in to access the Flashcard Generator.</p>
+                    <button 
+                        onClick={() => window.location.href = '/login'}
+                        className="px-6 py-3 bg-gradient-to-r from-cyan-500 to-purple-600 text-white rounded-lg hover:from-cyan-600 hover:to-purple-700 transition-all"
+                    >
+                        Go to Login
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen">
