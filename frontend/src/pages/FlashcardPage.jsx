@@ -72,8 +72,20 @@ const FlashcardPage = () => { // Remove user prop to be consistent
     // Check authentication on component mount
     useEffect(() => {
         const token = localStorage.getItem('token');
-        setIsAuthenticated(!!token);
+        console.log('FlashcardPage - Token check:', {
+            token: token,
+            tokenType: typeof token,
+            tokenLength: token ? token.length : 0,
+            isValid: !!(token && token !== 'undefined' && token !== 'null')
+        }); // Debug log
+        
+        const isValidToken = !!(token && token !== 'undefined' && token !== 'null');
+        setIsAuthenticated(isValidToken);
         setIsCheckingAuth(false);
+        
+        if (!isValidToken) {
+            console.log('FlashcardPage - No valid token found, user needs to login');
+        }
     }, []);
 
     // Helper function to get auth headers with better validation

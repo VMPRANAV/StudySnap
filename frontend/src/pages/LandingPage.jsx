@@ -407,6 +407,8 @@ const AuthModal = ({ isLoginMode, setIsLoginMode, onClose, onAuthSuccess }) => {
       const endpoint = isLoginMode ? 'login' : 'register';
       const url = `${import.meta.env.VITE_URL}/api/auth/${endpoint}`;
       
+      console.log('Attempting auth to:', url); // Debug log
+      
       const payload = isLoginMode 
         ? { username: formData.username, password: formData.password }
         : { username: formData.username, email: formData.email, password: formData.password };
@@ -420,23 +422,35 @@ const AuthModal = ({ isLoginMode, setIsLoginMode, onClose, onAuthSuccess }) => {
       });
 
       const data = await response.json();
+      console.log('Auth response:', data); // Debug log
 
       if (response.ok) {
         // Make sure token exists in response
         if (data.token) {
           localStorage.setItem('token', data.token);
-          console.log('Token stored:', data.token); // Debug log
+          console.log('Token stored successfully:', data.token); // Debug log
+          
+          // Verify token was stored
+          const storedToken = localStorage.getItem('token');
+          console.log('Token verification:', storedToken); // Debug log
         } else {
           console.error('No token in response:', data);
+          setError('Login successful but no token received');
+          return;
         }
         
         // Store user info if available
         if (data.user) {
           localStorage.setItem('user', JSON.stringify(data.user));
+          console.log('User stored:', data.user); // Debug log
         }
         
-        onAuthSuccess(data.user);
-        onClose();
+        // Add a small delay to ensure localStorage is updated
+        setTimeout(() => {
+          onAuthSuccess(data.user);
+          onClose();
+        }, 100);
+        
       } else {
         setError(data.message || 'Authentication failed');
       }

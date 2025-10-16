@@ -140,7 +140,8 @@ const QuizPage = () => { // Remove user prop
             return;
         }
 
-        if (!user) {
+        const token = localStorage.getItem('token');
+        if (!token) {
             setError("Authentication required. Please log in again.");
             return;
         }
@@ -158,11 +159,6 @@ const QuizPage = () => { // Remove user prop
             const formData = new FormData();
             formData.append('file', pdfFile);
             
-            const token = localStorage.getItem('token');
-            if (!token) {
-                throw new Error('No authentication token found');
-            }
-
             const uploadRes = await fetch(`${backendUrl}/upload`, { 
                 method: 'POST', 
                 headers: {
@@ -250,7 +246,8 @@ const QuizPage = () => { // Remove user prop
             return;
         }
 
-        if (!user) {
+        const token = localStorage.getItem('token');
+        if (!token) {
             setError("Authentication required. Please log in again.");
             return;
         }
