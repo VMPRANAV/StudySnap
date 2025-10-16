@@ -24,20 +24,58 @@ exports.processPdfForQuiz = async (req, res) => {
 
 exports.generateQuiz = async (req, res) => {
   try {
+    console.log('Generate quiz request:', { 
+      fileId: req.body.fileId, 
+      promptLength: req.body.prompt?.length,
+      userId: req.user?.id 
+    });
+
     const { fileId, prompt } = req.body;
     const documentText = textCache.get(fileId);
 
-    if (!documentText) return res.status(404).json({ message: 'File not processed.' });
+    if (!documentText) {
+      console.error('Document text not found in cache for fileId:', fileId);
+      return res.status(404).json({ message: 'File not processed or expired.' });
+    }
 
-    // Pass documentText and prompt as expected by the service
+    console.log('Document text length:', documentText.length);
+    console.log('Calling AiService.generateQuiz...');
+
+    // Generate quiz data
     const quizData = await AiService.generateQuiz(documentText, prompt);
-    const newQuiz = new Quiz({ topic: prompt, questions: quizData });
+    
+    console.log('Quiz data generated:', {
+      questionsCount: quizData?.length,
+      firstQuestion: quizData?.[0]
+    });
+
+    // ✅ FIX: Add userId from authenticated user
+    const quizPayload = { 
+      topic: prompt, 
+      questions: quizData
+    };
+
+    // Add userId if authenticated
+    if (req.user?.id) {
+      quizPayload.userId = req.user.id;
+    }
+
+    const newQuiz = new Quiz(quizPayload);
     await newQuiz.save();
+
+    console.log('Quiz saved successfully:', newQuiz._id);
 
     res.status(201).json(newQuiz);
   } catch (error) {
-    console.error('Error generating quiz:', error);
-    res.status(500).json({ message: 'Failed to generate quiz.' });
+    console.error('Error generating quiz:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    res.status(500).json({ 
+      message: 'Failed to generate quiz.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 
