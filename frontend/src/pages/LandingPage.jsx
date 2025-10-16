@@ -422,17 +422,26 @@ const AuthModal = ({ isLoginMode, setIsLoginMode, onClose, onAuthSuccess }) => {
       const data = await response.json();
 
       if (response.ok) {
-        // Store token and user info
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('user', JSON.stringify(data.user));
+        // Make sure token exists in response
+        if (data.token) {
+          localStorage.setItem('token', data.token);
+          console.log('Token stored:', data.token); // Debug log
+        } else {
+          console.error('No token in response:', data);
+        }
         
-        // Call success callback
+        // Store user info if available
+        if (data.user) {
+          localStorage.setItem('user', JSON.stringify(data.user));
+        }
+        
         onAuthSuccess(data.user);
         onClose();
       } else {
         setError(data.message || 'Authentication failed');
       }
     } catch (err) {
+      console.error('Auth error:', err);
       setError('Network error. Please try again.');
     } finally {
       setIsLoading(false);

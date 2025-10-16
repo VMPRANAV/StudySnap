@@ -76,53 +76,65 @@ const FlashcardPage = () => { // Remove user prop to be consistent
         setIsCheckingAuth(false);
     }, []);
 
-    // Helper function to get auth headers
+    // Helper function to get auth headers with better validation
     const getAuthHeaders = () => {
         const token = localStorage.getItem('token');
+        
+        if (!token || token === 'undefined' || token === 'null') {
+            throw new Error('No valid authentication token found');
+        }
+        
         return {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
         };
     };
 
+    // Update the fetchSets function
     useEffect(() => {
         const fetchSets = async () => {
             try {
                 const token = localStorage.getItem('token');
                 
-                if (!token) {
-                    setError('No authentication token found');
+                // Better token validation
+                if (!token || token === 'undefined' || token === 'null') {
+                    console.log('No valid token found, redirecting to login');
+                    setIsAuthenticated(false);
                     return;
                 }
 
                 const response = await fetch(backendUrl, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    }
+                    headers: getAuthHeaders()
                 });
 
                 if (response.status === 401) {
-                    // Token is invalid, redirect to login
+                    console.log('Token expired or invalid');
                     localStorage.removeItem('token');
                     localStorage.removeItem('user');
-                    window.location.reload();
+                    setIsAuthenticated(false);
                     return;
                 }
 
                 if (!response.ok) {
-                    throw new Error('Failed to fetch saved sets.');
+                    throw new Error(`Failed to fetch saved sets: ${response.status}`);
                 }
 
                 const data = await response.json();
                 setSavedSets(data);
             } catch (err) {
                 console.error("Could not fetch saved flashcard sets.", err);
-                setError('Could not connect to the backend to fetch saved sets.');
+                if (err.message.includes('authentication') || err.message.includes('token')) {
+                    setIsAuthenticated(false);
+                } else {
+                    setError('Could not connect to the backend to fetch saved sets.');
+                }
             }
         };
-        fetchSets();
-    }, []);
+
+        if (isAuthenticated) {
+            fetchSets();
+        }
+    }, [isAuthenticated]);
 
     const handleFileChange = (e) => {
         const file = e.target.files[0];
@@ -147,17 +159,19 @@ const FlashcardPage = () => { // Remove user prop to be consistent
             return;
         }
 
-        const token = localStorage.getItem('token');
-        if (!token) {
-            setError("Authentication required. Please log in again.");
-            return;
-        }
-
-        setIsLoading(true);
-        setError(null);
-        setUploadProgress(0);
-        
         try {
+            const token = localStorage.getItem('token');
+            
+            if (!token || token === 'undefined' || token === 'null') {
+                setError("Authentication required. Please log in again.");
+                setIsAuthenticated(false);
+                return;
+            }
+
+            setIsLoading(true);
+            setError(null);
+            setUploadProgress(0);
+            
             // Step 1: Upload PDF
             setCurrentStep('Uploading PDF document...');
             setUploadProgress(25);
@@ -176,7 +190,7 @@ const FlashcardPage = () => { // Remove user prop to be consistent
             if (uploadRes.status === 401) {
                 localStorage.removeItem('token');
                 localStorage.removeItem('user');
-                window.location.reload();
+                setIsAuthenticated(false);
                 return;
             }
             
@@ -206,7 +220,7 @@ const FlashcardPage = () => { // Remove user prop to be consistent
             if (genRes.status === 401) {
                 localStorage.removeItem('token');
                 localStorage.removeItem('user');
-                window.location.reload();
+                setIsAuthenticated(false);
                 return;
             }
             
@@ -230,9 +244,12 @@ const FlashcardPage = () => { // Remove user prop to be consistent
             }, 1000);
 
         } catch (err) {
-            setError(err.message || "An unexpected error occurred. Please check the console.");
-            setUploadProgress(0);
-            setCurrentStep('');
+            console.error('Generation error:', err);
+            if (err.message.includes('authentication') || err.message.includes('token')) {
+                setIsAuthenticated(false);
+            } else {
+                setError(err.message || "An unexpected error occurred.");
+            }
         } finally {
             setIsLoading(false);
         }
