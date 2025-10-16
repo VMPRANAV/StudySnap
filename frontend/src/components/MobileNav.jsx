@@ -1,0 +1,28 @@
+import React from 'react';
+import { Bars3Icon, UserCircleIcon } from '@heroicons/react/24/solid';
+
+const MobileNav = ({ setSidebarOpen, isSidebarOpen, user }) => {
+    return (
+        <div className="md:hidden flex items-center justify-between p-4 bg-black/10 border-b border-white/10">
+            <button
+                onClick={() => setSidebarOpen(!isSidebarOpen)}
+                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+            >
+                <Bars3Icon className="h-6 w-6 text-white" />
+            </button>
+            
+            {user && (
+                <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-r from-cyan-500 to-purple-600 flex items-center justify-center">
+                        <UserCircleIcon className="h-5 w-5 text-white" />
+                    </div>
+                    <span className="text-white text-sm font-medium">
+                        {user.username || user.email}
+                    </span>
+                </div>
+            )}
+        </div>
+    );
+};
+
+export default MobileNav;
