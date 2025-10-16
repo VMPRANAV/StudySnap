@@ -25,17 +25,32 @@ exports.processPdfForQuiz = async (req, res) => {
 exports.generateQuiz = async (req, res) => {
   try {
     console.log('Generate quiz request:', { 
+      body: req.body,
       fileId: req.body.fileId, 
       promptLength: req.body.prompt?.length,
       userId: req.user?.id 
     });
 
     const { fileId, prompt } = req.body;
+
+    // ✅ ADD: Validate required fields
+    if (!fileId) {
+      return res.status(400).json({ message: 'fileId is required.' });
+    }
+
+    if (!prompt) {
+      return res.status(400).json({ message: 'prompt is required.' });
+    }
+
     const documentText = textCache.get(fileId);
 
     if (!documentText) {
       console.error('Document text not found in cache for fileId:', fileId);
-      return res.status(404).json({ message: 'File not processed or expired.' });
+      console.log('Available cache keys:', Array.from(textCache.keys()));
+      return res.status(404).json({ 
+        message: 'File not processed or expired. Please upload the PDF again.',
+        availableFiles: Array.from(textCache.keys()) // For debugging
+      });
     }
 
     console.log('Document text length:', documentText.length);
@@ -49,13 +64,16 @@ exports.generateQuiz = async (req, res) => {
       firstQuestion: quizData?.[0]
     });
 
-    // ✅ FIX: Add userId from authenticated user
+    // ✅ ADD: Validate quiz data
+    if (!quizData || !Array.isArray(quizData) || quizData.length === 0) {
+      throw new Error('AI service returned invalid or empty quiz data');
+    }
+
     const quizPayload = { 
       topic: prompt, 
       questions: quizData
     };
 
-    // Add userId if authenticated
     if (req.user?.id) {
       quizPayload.userId = req.user.id;
     }
