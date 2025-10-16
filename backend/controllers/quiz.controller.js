@@ -53,11 +53,12 @@ exports.submitQuizAttempt = async (req, res) => {
   try {
     console.log('Submit quiz attempt called with:', {
       quizId: req.params.quizId,
+      userId: req.user?.id, // From JWT token
       body: req.body
     });
 
     const { quizId } = req.params;
-    const { userId, answers } = req.body;
+    const { answers } = req.body;
 
     // Validate input
     if (!quizId) {
@@ -68,9 +69,11 @@ exports.submitQuizAttempt = async (req, res) => {
       return res.status(400).json({ message: 'Answers array is required.' });
     }
 
+    // Get userId from authenticated user (from JWT middleware)
+    const userId = req.user?.id || null;
+
     // Call the service to do the heavy lifting
-    // Pass userId as null if not provided or invalid
-    const result = await QuizService.calculateAndSaveScore(quizId, userId || null, answers);
+    const result = await QuizService.calculateAndSaveScore(quizId, userId, answers);
 
     console.log('Quiz attempt result:', result);
 

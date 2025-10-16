@@ -264,7 +264,10 @@ const QuizPage = () => { // Remove user prop
             const response = await fetch(`${backendUrl}/${currentQuiz._id}/submit`, {
                 method: 'POST',
                 headers,
-                body: JSON.stringify({ answers })
+                body: JSON.stringify({ 
+                    answers
+                    // No userId needed - backend extracts from JWT
+                })
             });
 
             if (handleAuthError(response)) return;
