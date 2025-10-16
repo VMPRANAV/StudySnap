@@ -63,7 +63,7 @@ const FlashcardPage = ({ user }) => {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [view, setView] = useState('generate');
 
-    const backendUrl = 'http://localhost:3002/api/flashcards';
+    const backendUrl = '${import.meta.env.VITE_URL}/api/flashcards';
 
     // Helper function to get auth headers
     const getAuthHeaders = () => {

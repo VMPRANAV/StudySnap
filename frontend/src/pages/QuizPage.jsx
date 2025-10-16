@@ -54,7 +54,7 @@ const QuizPage = () => { // Remove user prop
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
-    const backendUrl = 'http://localhost:3002/api/quizzes';
+    const backendUrl = '${import.meta.env.VITE_URL}/api/quizzes';
 
     // Helper function to get auth headers
     const getAuthHeaders = () => {
