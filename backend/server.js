@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 const flashcardRoutes = require('./routes/flashcard.routes');
 const quizRoutes = require('./routes/quiz.routes');
 const authRoutes=require('./routes/auth.routes');
+const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 5001;
 app.use(cors(
@@ -28,8 +29,9 @@ app.use('/api/auth',authRoutes);
 app.get('/', (req, res) => {
   res.status(200).send('Personalized AI Educator Backend is running successfully!');
 });
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../frontend/build/index.html')); // Adjust path to your built frontend
+app.use((req, res) => {
+  // Adjust the path to your built frontend index.html
+  res.sendFile(path.join(__dirname, '../frontend/build/index.html'));
 });
 
 mongoose.connect(process.env.MONGODB_URI)
