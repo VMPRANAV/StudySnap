@@ -1,14 +1,15 @@
 const AiService = require('../services/ai.service');
 const Quiz = require('../models/quiz.model');
-
-const QuizService = require('../services/quiz.service'); // Add this missing import
+const QuizService = require('../services/quiz.service');
 
 // Using a simple in-memory cache for extracted text (similar to flashcard controller)
 const textCache = new Map();
 
 exports.processPdfForQuiz = async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ message: 'No file uploaded.' });
+    if (!req.file) {
+      return res.status(400).json({ message: 'No file uploaded.' });
+    }
 
     // Extract text from PDF instead of creating vector store
     const documentText = await AiService.extractTextFromPdf(req.file.path);
@@ -33,13 +34,18 @@ exports.generateQuiz = async (req, res) => {
 
     const { fileId, prompt } = req.body;
 
-    // ✅ ADD: Validate required fields
+    // Validate required fields
     if (!fileId) {
       return res.status(400).json({ message: 'fileId is required.' });
     }
 
     if (!prompt) {
       return res.status(400).json({ message: 'prompt is required.' });
+    }
+
+    // Validate user is authenticated
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ message: 'User authentication required.' });
     }
 
     const documentText = textCache.get(fileId);
@@ -64,21 +70,19 @@ exports.generateQuiz = async (req, res) => {
       firstQuestion: quizData?.[0]
     });
 
-    // ✅ ADD: Validate quiz data
+    // Validate quiz data
     if (!quizData || !Array.isArray(quizData) || quizData.length === 0) {
       throw new Error('AI service returned invalid or empty quiz data');
     }
 
-    const quizPayload = { 
+    // Create quiz with authenticated user's ID
+    const newQuiz = new Quiz({ 
+      userId: req.user.id,
+      sourceFileId: fileId,
       topic: prompt, 
       questions: quizData
-    };
+    });
 
-    if (req.user?.id) {
-      quizPayload.userId = req.user.id;
-    }
-
-    const newQuiz = new Quiz(quizPayload);
     await newQuiz.save();
 
     console.log('Quiz saved successfully:', newQuiz._id);
@@ -99,17 +103,28 @@ exports.generateQuiz = async (req, res) => {
 
 exports.getQuizzes = async (req, res) => {
   try {
-    const quizzes = await Quiz.find().sort({ createdAt: -1 });
+    // Validate user is authenticated
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ message: 'User authentication required.' });
+    }
+
+    // Get only quizzes belonging to the authenticated user
+    const quizzes = await Quiz.find({ userId: req.user.id })
+      .sort({ createdAt: -1 })
+      .populate('userId', 'username email');
+
     res.status(200).json(quizzes);
   } catch (error) {
+    console.error('Error fetching quizzes:', error);
     res.status(500).json({ message: 'Failed to fetch quizzes.' });
   }
 };
+
 exports.submitQuizAttempt = async (req, res) => {
   try {
     console.log('Submit quiz attempt called with:', {
       quizId: req.params.quizId,
-      userId: req.user?.id, // From JWT token
+      userId: req.user?.id,
       body: req.body
     });
 
@@ -125,15 +140,16 @@ exports.submitQuizAttempt = async (req, res) => {
       return res.status(400).json({ message: 'Answers array is required.' });
     }
 
-    // Get userId from authenticated user (from JWT middleware)
-    const userId = req.user?.id || null;
+    // Validate user is authenticated
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ message: 'User authentication required.' });
+    }
 
     // Call the service to do the heavy lifting
-    const result = await QuizService.calculateAndSaveScore(quizId, userId, answers);
+    const result = await QuizService.calculateAndSaveScore(quizId, req.user.id, answers);
 
     console.log('Quiz attempt result:', result);
 
-    // Send the result back to the client
     res.status(201).json(result);
 
   } catch (error) {

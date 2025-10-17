@@ -50,7 +50,7 @@ const ProgressIndicator = ({ progress, step }) => {
     );
 };
 
-const FlashcardPage = () => { // Remove user prop to be consistent
+const FlashcardPage = ({ isSidebarOpen }) => {
     const [prompt, setPrompt] = useState('Create 5 flashcards on the key definitions.');
     const [pdfFile, setPdfFile] = useState(null);
     const [fileName, setFileName] = useState('');
@@ -63,36 +63,56 @@ const FlashcardPage = () => { // Remove user prop to be consistent
     const [currentIndex, setCurrentIndex] = useState(0);
     const [view, setView] = useState('generate');
 
-    // Add authentication state like in QuizPage
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+    const backend=import.meta.env.VITE_URL||'http://localhost:3000'
 
-    const backendUrl = `${import.meta.env.VITE_URL}/api/flashcards`;
+    const backendUrl = `${backend}/api/flashcards`;
 
-    // Check authentication on component mount
+    // Improved authentication check
     useEffect(() => {
-        const token = localStorage.getItem('token');
-        console.log('FlashcardPage - Token check:', {
-            token: token,
-            tokenType: typeof token,
-            tokenLength: token ? token.length : 0,
-            isValid: !!(token && token !== 'undefined' && token !== 'null')
-        }); // Debug log
+        const checkAuth = () => {
+            const token = localStorage.getItem('token');
+            const user = localStorage.getItem('user');
+            
+            console.log('Auth Check:', { 
+                hasToken: !!token, 
+                tokenPreview: token ? token.substring(0, 20) + '...' : 'none',
+                hasUser: !!user 
+            });
+            
+            // More robust validation
+            const isValid = token && 
+                           token.trim() !== '' && 
+                           token !== 'undefined' && 
+                           token !== 'null' &&
+                           user &&
+                           user !== 'undefined' &&
+                           user !== 'null';
+            
+            setIsAuthenticated(isValid);
+            setIsCheckingAuth(false);
+            
+            if (!isValid) {
+                console.log('Authentication failed - clearing storage');
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+            }
+        };
+
+        checkAuth();
         
-        const isValidToken = !!(token && token !== 'undefined' && token !== 'null');
-        setIsAuthenticated(isValidToken);
-        setIsCheckingAuth(false);
-        
-        if (!isValidToken) {
-            console.log('FlashcardPage - No valid token found, user needs to login');
-        }
+        // Listen for storage changes (login from another tab)
+        window.addEventListener('storage', checkAuth);
+        return () => window.removeEventListener('storage', checkAuth);
     }, []);
 
-    // Helper function to get auth headers with better validation
+    // Helper function with improved validation
     const getAuthHeaders = () => {
         const token = localStorage.getItem('token');
         
-        if (!token || token === 'undefined' || token === 'null') {
+        if (!token || token.trim() === '' || token === 'undefined' || token === 'null') {
+            console.error('Invalid token detected');
             throw new Error('No valid authentication token found');
         }
         
@@ -102,50 +122,46 @@ const FlashcardPage = () => { // Remove user prop to be consistent
         };
     };
 
-    // Update the fetchSets function
+    // Improved fetch with error handling
+    const handleAuthError = (response) => {
+        if (response.status === 401 || response.status === 403) {
+            console.log('Auth error - clearing credentials');
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            setIsAuthenticated(false);
+            return true;
+        }
+        return false;
+    };
+
     useEffect(() => {
         const fetchSets = async () => {
+            if (!isAuthenticated) return;
+
             try {
-                const token = localStorage.getItem('token');
+                const headers = getAuthHeaders();
                 
-                // Better token validation
-                if (!token || token === 'undefined' || token === 'null') {
-                    console.log('No valid token found, redirecting to login');
-                    setIsAuthenticated(false);
-                    return;
-                }
+                const response = await fetch(backendUrl, { headers });
 
-                const response = await fetch(backendUrl, {
-                    headers: getAuthHeaders()
-                });
-
-                if (response.status === 401) {
-                    console.log('Token expired or invalid');
-                    localStorage.removeItem('token');
-                    localStorage.removeItem('user');
-                    setIsAuthenticated(false);
-                    return;
-                }
+                if (handleAuthError(response)) return;
 
                 if (!response.ok) {
-                    throw new Error(`Failed to fetch saved sets: ${response.status}`);
+                    throw new Error(`Failed to fetch: ${response.status}`);
                 }
 
                 const data = await response.json();
                 setSavedSets(data);
             } catch (err) {
-                console.error("Could not fetch saved flashcard sets.", err);
-                if (err.message.includes('authentication') || err.message.includes('token')) {
+                console.error("Fetch error:", err);
+                if (err.message.includes('token')) {
                     setIsAuthenticated(false);
                 } else {
-                    setError('Could not connect to the backend to fetch saved sets.');
+                    setError('Could not load saved flashcard sets.');
                 }
             }
         };
 
-        if (isAuthenticated) {
-            fetchSets();
-        }
+        fetchSets();
     }, [isAuthenticated]);
 
     const handleFileChange = (e) => {
@@ -172,24 +188,17 @@ const FlashcardPage = () => { // Remove user prop to be consistent
         }
 
         try {
-            const token = localStorage.getItem('token');
-            
-            if (!token || token === 'undefined' || token === 'null') {
-                setError("Authentication required. Please log in again.");
-                setIsAuthenticated(false);
-                return;
-            }
-
             setIsLoading(true);
             setError(null);
             setUploadProgress(0);
             
-            // Step 1: Upload PDF
             setCurrentStep('Uploading PDF document...');
             setUploadProgress(25);
             
             const formData = new FormData();
             formData.append('file', pdfFile);
+            
+            const token = localStorage.getItem('token');
             
             const uploadRes = await fetch(`${backendUrl}/upload`, { 
                 method: 'POST', 
@@ -199,15 +208,13 @@ const FlashcardPage = () => { // Remove user prop to be consistent
                 body: formData 
             });
             
-            if (uploadRes.status === 401) {
-                localStorage.removeItem('token');
-                localStorage.removeItem('user');
-                setIsAuthenticated(false);
+            if (handleAuthError(uploadRes)) {
+                setError('Session expired. Please login again.');
                 return;
             }
             
             if (!uploadRes.ok) {
-                throw new Error(`PDF upload failed with status: ${uploadRes.status}`);
+                throw new Error(`Upload failed: ${uploadRes.status}`);
             }
             
             setUploadProgress(50);
@@ -216,33 +223,26 @@ const FlashcardPage = () => { // Remove user prop to be consistent
             const uploadData = await uploadRes.json();
             const fileId = uploadData.fileId;
             
-            // Step 2: Generate flashcards
             setCurrentStep('Generating flashcards with AI...');
             setUploadProgress(75);
             
             const genRes = await fetch(`${backendUrl}/generate`, {
                 method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({ fileId, prompt }),
             });
             
-            if (genRes.status === 401) {
-                localStorage.removeItem('token');
-                localStorage.removeItem('user');
-                setIsAuthenticated(false);
+            if (handleAuthError(genRes)) {
+                setError('Session expired. Please login again.');
                 return;
             }
             
             if (!genRes.ok) {
-                throw new Error(`Flashcard generation failed with status: ${genRes.status}`);
+                throw new Error(`Generation failed: ${genRes.status}`);
             }
             
             const newSet = await genRes.json();
             
-            // Step 3: Complete
             setCurrentStep('Flashcards generated successfully!');
             setUploadProgress(100);
             
@@ -257,11 +257,7 @@ const FlashcardPage = () => { // Remove user prop to be consistent
 
         } catch (err) {
             console.error('Generation error:', err);
-            if (err.message.includes('authentication') || err.message.includes('token')) {
-                setIsAuthenticated(false);
-            } else {
-                setError(err.message || "An unexpected error occurred.");
-            }
+            setError(err.message || "Generation failed. Please try again.");
         } finally {
             setIsLoading(false);
         }
@@ -273,11 +269,10 @@ const FlashcardPage = () => { // Remove user prop to be consistent
         setView('viewer');
     };
 
-    // Add authentication check like in QuizPage
     if (isCheckingAuth) {
         return (
             <div className="min-h-screen flex items-center justify-center">
-                <div className="text-white">Checking authentication...</div>
+                <div className="text-white text-xl">Checking authentication...</div>
             </div>
         );
     }
@@ -289,7 +284,10 @@ const FlashcardPage = () => { // Remove user prop to be consistent
                     <h2 className="text-2xl font-bold text-white mb-4">Authentication Required</h2>
                     <p className="text-slate-300 mb-6">Please log in to access the Flashcard Generator.</p>
                     <button 
-                        onClick={() => window.location.href = '/login'}
+                        onClick={() => {
+                            localStorage.clear();
+                            window.location.href = '/';
+                        }}
                         className="px-6 py-3 bg-gradient-to-r from-cyan-500 to-purple-600 text-white rounded-lg hover:from-cyan-600 hover:to-purple-700 transition-all"
                     >
                         Go to Login
@@ -300,7 +298,7 @@ const FlashcardPage = () => { // Remove user prop to be consistent
     }
 
     return (
-        <div className="min-h-screen">
+        <div className={`min-h-screen transition-all duration-300 ${isSidebarOpen ? 'md:ml-0' : 'md:ml-0'}`}>
             {/* Header */}
             <motion.div 
                 initial={{ opacity: 0, y: -20 }}
@@ -315,7 +313,7 @@ const FlashcardPage = () => { // Remove user prop to be consistent
                 </p>
             </motion.div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-start max-w-7xl mx-auto">
+            <div className={`grid grid-cols-1 ${isSidebarOpen ? 'lg:grid-cols-2' : 'xl:grid-cols-2'} gap-10 items-start max-w-7xl mx-auto transition-all duration-300`}>
                 {/* Left Panel - Generator */}
                 <motion.div 
                     initial={{ opacity: 0, x: -50 }}

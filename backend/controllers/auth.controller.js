@@ -1,59 +1,73 @@
 const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
+const User = require('../models/user.model');
 
-// --- Configuration ---
-// In a real application, this secret should be in a secure config file or environment variable.
 const JWT_SECRET = process.env.JWT_SECRET;
-
-// In-memory storage for a single user. This will be null until a user registers.
-// NOTE: This is not persistent. The user will be lost if the server restarts.
-let userStore = null;
-
 
 /**
  * @desc      Register a new user
  * @route     POST /api/auth/register
  * @access    Public
- * @note      Allows a single user to be registered in-memory.
  */
 exports.register = async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const { username, email, password } = req.body;
 
     // Basic validation
-    if (!username || !password) {
-        return res.status(400).json({ message: 'Please provide a username and password.' });
+    if (!username || !email || !password) {
+      return res.status(400).json({ 
+        message: 'Please provide username, email, and password.' 
+      });
     }
 
-    // Check if a user is already registered in our in-memory store
-    if (userStore) {
-      return res.status(409).json({ message: 'A user is already registered. Only one user is allowed.' });
+    // Check if user already exists
+    const existingUser = await User.findOne({ 
+      $or: [{ email }, { username }] 
+    });
+
+    if (existingUser) {
+      return res.status(409).json({ 
+        message: 'User with this email or username already exists.' 
+      });
     }
 
-    // Create the new user object and store it in memory
-    // In a real application, you would hash the password before storing it.
-    // e.g., using bcrypt: const hashedPassword = await bcrypt.hash(password, 10);
-    userStore = {
-        id: crypto.randomUUID(),
-        username,
-        password, // Storing plain text password for simplicity. DO NOT DO THIS IN PRODUCTION.
-        role: 'user'
-    };
+    // Create new user (password will be automatically hashed by the model)
+    const user = await User.create({
+      username,
+      email,
+      password
+    });
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { id: user._id, username: user.username, email: user.email },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
 
     res.status(201).json({
+      status: 'success',
       message: 'User registered successfully!',
+      token,
       data: {
-          id: userStore.id,
-          username: userStore.username,
+        id: user._id,
+        username: user.username,
+        email: user.email
       }
     });
 
   } catch (error) {
     console.error("Registration Error:", error);
+    
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ 
+        message: Object.values(error.errors).map(e => e.message).join(', ')
+      });
+    }
+    
     res.status(500).json({ message: 'Server error during registration.' });
   }
 };
-
 
 /**
  * @desc      Login a user
@@ -62,43 +76,50 @@ exports.register = async (req, res) => {
  */
 exports.login = async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const { email, password } = req.body;
 
-    // 1. Basic validation: Check if username and password were provided.
-    if (!username || !password) {
-      return res.status(400).json({ message: 'Please provide a username and password.' });
-    }
-    
-    // 2. Check if a user has been registered
-    if (!userStore) {
-        return res.status(401).json({ message: 'Invalid credentials. No user has been registered.' });
+    // 1. Validate input
+    if (!email || !password) {
+      return res.status(400).json({ 
+        message: 'Please provide email and password.' 
+      });
     }
 
-    // 3. Authenticate user: Check if the provided credentials match the stored user.
-    const isUsernameMatch = username === userStore.username;
-    const isPasswordMatch = password === userStore.password;
+    // 2. Find user and explicitly select password field
+    const user = await User.findOne({ email }).select('+password');
 
-    if (!isUsernameMatch || !isPasswordMatch) {
-      return res.status(401).json({ message: 'Invalid credentials.' });
+    if (!user) {
+      return res.status(401).json({ 
+        message: 'Invalid credentials.' 
+      });
     }
 
-    // 4. If credentials are correct, create a JWT.
+    // 3. Check password using the model's method
+    const isPasswordCorrect = await user.comparePassword(password);
+
+    if (!isPasswordCorrect) {
+      return res.status(401).json({ 
+        message: 'Invalid credentials.' 
+      });
+    }
+
+    // 4. Generate JWT token
     const token = jwt.sign(
-      { id: userStore.id, role: userStore.role, username: userStore.username },
+      { id: user._id, username: user.username, email: user.email },
       JWT_SECRET,
-      { expiresIn: '1h' } // Token will expire in 1 hour
+      { expiresIn: '7d' }
     );
 
-    // 5. Send the successful response with the token.
+    // 5. Send response
     res.status(200).json({
       status: 'success',
       message: 'Login successful!',
       token,
       data: {
-        id: userStore.id,
-        username: userStore.username,
-        role: userStore.role,
-      },
+        id: user._id,
+        username: user.username,
+        email: user.email
+      }
     });
 
   } catch (error) {

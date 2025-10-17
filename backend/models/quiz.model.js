@@ -27,8 +27,9 @@ const questionSchema = new mongoose.Schema({
 const quizSchema = new mongoose.Schema({
   // For linking to a user account in the future.
   userId: {
-    type: String, // Changed from mongoose.Schema.Types.ObjectId
+    type: mongoose.Schema.Types.ObjectId, 
     ref: 'User',
+    required: [true, 'A user ID is required.'],
   },
   // For linking to the PDF the quiz was generated from.
   sourceFileId: {

@@ -34,7 +34,7 @@ const ProgressIndicator = ({ progress, step }) => (
     </motion.div>
 );
 
-const QuizPage = () => { // Remove user prop
+const QuizPage = ({ isSidebarOpen }) => { // Add isSidebarOpen prop
     // --- State Management ---
     const [prompt, setPrompt] = useState('Create a 5 question quiz on the key topics.');
     const [pdfFile, setPdfFile] = useState(null);
@@ -53,8 +53,8 @@ const QuizPage = () => { // Remove user prop
     // Authentication check state
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [isCheckingAuth, setIsCheckingAuth] = useState(true);
-
-    const backendUrl = `${import.meta.env.VITE_URL}/api/quizzes`;
+const backend=import.meta.env.VITE_URL||'http://localhost:3000'
+    const backendUrl = `${backend}/api/quizzes`;
 
     // Helper function to get auth headers
     const getAuthHeaders = () => {
@@ -342,7 +342,7 @@ const QuizPage = () => { // Remove user prop
 
     // --- Main Render Logic ---
     return (
-        <div className="min-h-screen">
+        <div className={`min-h-screen transition-all duration-300`}>
             <motion.div 
                 initial={{ opacity: 0, y: -20 }} 
                 animate={{ opacity: 1, y: 0 }} 
@@ -356,7 +356,7 @@ const QuizPage = () => { // Remove user prop
                 </p>
             </motion.div>
 
-            <div className="max-w-7xl mx-auto">
+            <div className={`max-w-7xl mx-auto transition-all duration-300 ${isSidebarOpen ? 'px-4' : 'px-6'}`}>
                 <AnimatePresence mode="wait">
                     {view === 'generate' && (
                         <motion.div 
@@ -364,7 +364,7 @@ const QuizPage = () => { // Remove user prop
                             initial={{ opacity: 0, scale: 0.95 }}
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.95 }}
-                            className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-start"
+                            className={`grid grid-cols-1 ${isSidebarOpen ? 'lg:grid-cols-2' : 'xl:grid-cols-2'} gap-10 items-start transition-all duration-300`}
                         >
                             {/* Left Panel: Generator */}
                             <div className="bg-white/5 backdrop-blur-xl p-8 rounded-3xl border border-white/10 shadow-2xl space-y-8">
