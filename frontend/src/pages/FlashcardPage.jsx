@@ -9,7 +9,7 @@ import {
     SparklesIcon,
     CheckCircleIcon
 } from '@heroicons/react/24/solid';
-
+const backend=import.meta.env.VITE_URL||'http://localhost:3000';
 // Progress Indicator Component
 const ProgressIndicator = ({ progress, step }) => {
     return (
@@ -67,7 +67,7 @@ const FlashcardPage = () => { // Remove user prop to be consistent
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
-    const backendUrl = `${import.meta.env.VITE_URL}/api/flashcards`;
+    const backendUrl = `${backend}/api/flashcards`;
 
     // Check authentication on component mount
     useEffect(() => {

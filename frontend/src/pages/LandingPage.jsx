@@ -378,7 +378,7 @@ const ContactModal = ({ onClose }) => {
     </motion.div>
   );
 };
-
+const backend=import.meta.env.VITE_URL||"http://localhost:3000"
 // Auth Modal Component - UPDATED FOR USERNAME/PASSWORD LOGIN
 const AuthModal = ({ isLoginMode, setIsLoginMode, onClose, onAuthSuccess }) => {
   const [formData, setFormData] = useState({
@@ -405,7 +405,7 @@ const AuthModal = ({ isLoginMode, setIsLoginMode, onClose, onAuthSuccess }) => {
 
     try {
       const endpoint = isLoginMode ? 'login' : 'register';
-      const url = `${import.meta.env.VITE_URL}/api/auth/${endpoint}`;
+      const url = `${backend}/api/auth/${endpoint}`;
       
       console.log('Attempting auth to:', url); // Debug log
       

@@ -8,7 +8,7 @@ import LandingPage from './pages/LandingPage';
 
 const App = () => {
     const [currentPage, setCurrentPage] = useState('landing');
-    const [isSidebarOpen, setSidebarOpen] = useState(true);
+    const [isSidebarOpen, setSidebarOpen] = useState(false); // Changed to false by default
     const [user, setUser] = useState(null);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
 
@@ -37,12 +37,31 @@ const App = () => {
         setCurrentPage('dashboard');
     };
 
-    const handleLogout = () => {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        setUser(null);
-        setIsAuthenticated(false);
-        setCurrentPage('landing');
+    const handleLogout = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            
+            // Optional: Call backend logout
+            if (token) {
+                await fetch(`${import.meta.env.VITE_URL}/api/auth/logout`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                }).catch(err => console.log('Logout endpoint error:', err));
+            }
+        } catch (error) {
+            console.error('Logout error:', error);
+        } finally {
+            // Always clear storage
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            setUser(null);
+            setIsAuthenticated(false);
+            setCurrentPage('landing');
+            setSidebarOpen(false);
+        }
     };
 
     const renderPage = () => {
@@ -76,34 +95,27 @@ const App = () => {
         );
     }
 
+    // FIXED: Simplified layout, sidebar renders only once
     return (
         <div className="flex min-h-screen bg-gray-900 text-white font-sans">
-            {/* Overlay for mobile */}
-            {isSidebarOpen && (
-                <div 
-                    className="fixed inset-0 bg-black/50 z-10 md:hidden"
-                    onClick={() => setSidebarOpen(false)}
-                />
-            )}
-            <div className={`fixed inset-y-0 left-0 z-20 md:relative md:z-auto ${
-                isSidebarOpen ? 'block' : 'hidden md:block'
-            }`}>
-                <Sidebar 
-                    currentPage={currentPage} 
-                    setCurrentPage={setCurrentPage}
-                    isSidebarOpen={isSidebarOpen}
-                    setSidebarOpen={setSidebarOpen}
-                    user={user}
-                    onLogout={handleLogout}
-                />
-            </div>
-            <main className="flex-1 transition-all duration-300">
+            {/* Sidebar - handles its own mobile overlay */}
+            <Sidebar 
+                currentPage={currentPage} 
+                setCurrentPage={setCurrentPage}
+                isSidebarOpen={isSidebarOpen}
+                setSidebarOpen={setSidebarOpen}
+                user={user}
+                onLogout={handleLogout}
+            />
+            
+            {/* Main Content */}
+            <main className="flex-1 flex flex-col min-h-screen">
                 <MobileNav 
                     setSidebarOpen={setSidebarOpen} 
                     isSidebarOpen={isSidebarOpen}
                     user={user}
                 />
-                <div className="p-4 sm:p-6 lg:p-8">
+                <div className="flex-1 p-4 sm:p-6 lg:p-8">
                     {renderPage()}
                 </div>
             </main>

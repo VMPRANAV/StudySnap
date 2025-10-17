@@ -33,7 +33,7 @@ const ProgressIndicator = ({ progress, step }) => (
         </div>
     </motion.div>
 );
-
+const backend=import.meta.env.VITE_URL||'http://localhost:3000'
 const QuizPage = () => { // Remove user prop
     // --- State Management ---
     const [prompt, setPrompt] = useState('Create a 5 question quiz on the key topics.');
@@ -54,7 +54,7 @@ const QuizPage = () => { // Remove user prop
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
-    const backendUrl = `${import.meta.env.VITE_URL}/api/quizzes`;
+    const backendUrl = `${backend}/api/quizzes`;
 
     // Helper function to get auth headers
     const getAuthHeaders = () => {

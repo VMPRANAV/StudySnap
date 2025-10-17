@@ -13,11 +13,10 @@
   "description": "",
   "dependencies": {
     "@langchain/community": "^0.3.57",
-    
+    "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
-
     "groq-sdk": "^0.33.0",
     "langchain": "^0.3.35",
     "mongoose": "^8.19.1",

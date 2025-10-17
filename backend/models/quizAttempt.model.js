@@ -23,8 +23,8 @@ const quizAttemptSchema = new mongoose.Schema({
   // A reference to the user who took the quiz.
   userId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User', // This links it to a User model (for when you add authentication)
-    // required: true, // This can be enabled once you have a User model
+    ref: 'User',
+    required: [true, 'A user ID is required.'],
   },
   // An array containing all the answers submitted by the user.
   answers: [answerSchema],

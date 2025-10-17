@@ -18,10 +18,10 @@ const flashcardSchema = new mongoose.Schema({
 // This is the main schema for a complete set of flashcards.
 const flashcardSetSchema = new mongoose.Schema({
   // For linking to a user account in the future.
-  userId: {
+ userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    // required: true, // This can be enabled once you have a User model
+    required: [true, 'A user ID is required.'],
   },
   // For linking to the specific uploaded file in the future.
   sourceFileId: {
