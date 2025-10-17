@@ -28,6 +28,10 @@ app.use('/api/auth',authRoutes);
 app.get('/', (req, res) => {
   res.status(200).send('Personalized AI Educator Backend is running successfully!');
 });
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/build/index.html')); // Adjust path to your built frontend
+});
+
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => {
     console.log('Successfully connected to MongoDB.');
