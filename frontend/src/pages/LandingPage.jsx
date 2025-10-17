@@ -14,6 +14,8 @@ import {
   LockClosedIcon
 } from "@heroicons/react/24/outline";
 
+const backend = import.meta.env.VITE_URL || "http://localhost:3000";
+
 const LandingPage = ({ onStartLearning, onLogin }) => {
   const [showContactForm, setShowContactForm] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -41,9 +43,10 @@ const LandingPage = ({ onStartLearning, onLogin }) => {
     setIsLoginMode(true);
   };
 
-  const handleAuthSuccess = (user) => {
+  const handleAuthSuccess = (userData) => {
+    console.log('Auth success, user data:', userData);
     if (onLogin) {
-      onLogin(user);
+      onLogin(userData);
     }
     if (onStartLearning) {
       onStartLearning('dashboard');
@@ -182,7 +185,6 @@ const LandingPage = ({ onStartLearning, onLogin }) => {
                 <span>Start Learning</span>
               </div>
               
-              {/* Animated background */}
               <div className="absolute inset-0 bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 opacity-0 hover:opacity-20 transition-opacity duration-500"></div>
             </motion.button>
           </motion.div>
@@ -202,7 +204,6 @@ const LandingPage = ({ onStartLearning, onLogin }) => {
             variants={containerVariants}
             className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center"
           >
-            {/* Left side - Text content */}
             <div className="space-y-8">
               <motion.h2 
                 variants={itemVariants}
@@ -237,7 +238,6 @@ const LandingPage = ({ onStartLearning, onLogin }) => {
               </motion.button>
             </div>
 
-            {/* Right side - Visual element */}
             <motion.div 
               variants={itemVariants}
               className="relative"
@@ -285,7 +285,7 @@ const LandingPage = ({ onStartLearning, onLogin }) => {
   );
 };
 
-// Contact Modal Component (unchanged)
+// Contact Modal Component
 const ContactModal = ({ onClose }) => {
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -369,7 +369,6 @@ const ContactModal = ({ onClose }) => {
                 <PaperAirplaneIcon className="h-5 w-5" />
               </div>
               
-              {/* Animated background */}
               <div className="absolute inset-0 bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 opacity-0 hover:opacity-20 transition-opacity duration-500"></div>
             </motion.button>
           </div>
@@ -378,8 +377,8 @@ const ContactModal = ({ onClose }) => {
     </motion.div>
   );
 };
-const backend=import.meta.env.VITE_URL||"http://localhost:3000"
-// Auth Modal Component - UPDATED FOR USERNAME/PASSWORD LOGIN
+
+// Auth Modal Component - UPDATED
 const AuthModal = ({ isLoginMode, setIsLoginMode, onClose, onAuthSuccess }) => {
   const [formData, setFormData] = useState({
     username: '',
@@ -395,7 +394,7 @@ const AuthModal = ({ isLoginMode, setIsLoginMode, onClose, onAuthSuccess }) => {
       ...formData,
       [e.target.name]: e.target.value
     });
-    setError(''); // Clear error when user starts typing
+    setError('');
   };
 
   const handleSubmit = async (e) => {
@@ -407,10 +406,10 @@ const AuthModal = ({ isLoginMode, setIsLoginMode, onClose, onAuthSuccess }) => {
       const endpoint = isLoginMode ? 'login' : 'register';
       const url = `${backend}/api/auth/${endpoint}`;
       
-      console.log('Attempting auth to:', url); // Debug log
+      console.log('Attempting auth to:', url);
       
       const payload = isLoginMode 
-        ? { username: formData.username, password: formData.password }
+        ? { email: formData.email, password: formData.password }
         : { username: formData.username, email: formData.email, password: formData.password };
 
       const response = await fetch(url, {
@@ -422,32 +421,27 @@ const AuthModal = ({ isLoginMode, setIsLoginMode, onClose, onAuthSuccess }) => {
       });
 
       const data = await response.json();
-      console.log('Auth response:', data); // Debug log
+      console.log('Auth response:', data);
 
       if (response.ok) {
-        // Make sure token exists in response
         if (data.token) {
           localStorage.setItem('token', data.token);
-          console.log('Token stored successfully:', data.token); // Debug log
-          
-          // Verify token was stored
-          const storedToken = localStorage.getItem('token');
-          console.log('Token verification:', storedToken); // Debug log
+          console.log('Token stored successfully');
         } else {
           console.error('No token in response:', data);
-          setError('Login successful but no token received');
+          setError('Authentication successful but no token received');
           return;
         }
         
-        // Store user info if available
-        if (data.user) {
-          localStorage.setItem('user', JSON.stringify(data.user));
-          console.log('User stored:', data.user); // Debug log
+        // Store user info from response
+        const userData = data.data || data.user;
+        if (userData) {
+          localStorage.setItem('user', JSON.stringify(userData));
+          console.log('User stored:', userData);
         }
         
-        // Add a small delay to ensure localStorage is updated
         setTimeout(() => {
-          onAuthSuccess(data.user);
+          onAuthSuccess(userData);
           onClose();
         }, 100);
         
@@ -490,37 +484,34 @@ const AuthModal = ({ isLoginMode, setIsLoginMode, onClose, onAuthSuccess }) => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Username field - always shown */}
-          <div className="relative">
-            <UserIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-slate-400" />
-            <input
-              type="text"
-              name="username"
-              placeholder="Username"
-              required
-              value={formData.username}
-              onChange={handleInputChange}
-              className="w-full bg-white/5 border border-white/20 rounded-xl py-4 pl-12 pr-4 text-white placeholder-slate-400 focus:ring-2 focus:ring-cyan-400/50 focus:border-cyan-400/50 focus:outline-none transition-all duration-300"
-            />
-          </div>
-
-          {/* Email field - only shown in signup mode */}
           {!isLoginMode && (
             <div className="relative">
-              <EnvelopeIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-slate-400" />
+              <UserIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-slate-400" />
               <input
-                type="email"
-                name="email"
-                placeholder="Email Address"
+                type="text"
+                name="username"
+                placeholder="Username"
                 required
-                value={formData.email}
+                value={formData.username}
                 onChange={handleInputChange}
                 className="w-full bg-white/5 border border-white/20 rounded-xl py-4 pl-12 pr-4 text-white placeholder-slate-400 focus:ring-2 focus:ring-cyan-400/50 focus:border-cyan-400/50 focus:outline-none transition-all duration-300"
               />
             </div>
           )}
 
-          {/* Password field */}
+          <div className="relative">
+            <EnvelopeIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-slate-400" />
+            <input
+              type="email"
+              name="email"
+              placeholder="Email Address"
+              required
+              value={formData.email}
+              onChange={handleInputChange}
+              className="w-full bg-white/5 border border-white/20 rounded-xl py-4 pl-12 pr-4 text-white placeholder-slate-400 focus:ring-2 focus:ring-cyan-400/50 focus:border-cyan-400/50 focus:outline-none transition-all duration-300"
+            />
+          </div>
+
           <div className="relative">
             <LockClosedIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-slate-400" />
             <input
@@ -573,7 +564,6 @@ const AuthModal = ({ isLoginMode, setIsLoginMode, onClose, onAuthSuccess }) => {
               )}
             </div>
             
-            {/* Animated background */}
             <div className="absolute inset-0 bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 opacity-0 hover:opacity-20 transition-opacity duration-500"></div>
           </motion.button>
         </form>
