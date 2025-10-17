@@ -15,13 +15,7 @@ const MobileNav = ({ setSidebarOpen, isSidebarOpen, user }) => {
                 Study Snap
             </h1>
             
-            {user && (
-                <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-r from-cyan-500 to-purple-600 flex items-center justify-center">
-                        <UserCircleIcon className="h-5 w-5 text-white" />
-                    </div>
-                </div>
-            )}
+            
         </div>
     );
 };
