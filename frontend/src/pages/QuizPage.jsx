@@ -1,16 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  DocumentArrowUpIcon,
-  SparklesIcon,
-  CheckCircleIcon,
-  XCircleIcon,
-  ArrowPathIcon,
-  ClockIcon,
-  ChartBarIcon,
-  BookOpenIcon,
-  ExclamationCircleIcon
-} from '@heroicons/react/24/outline';
+import { 
+    DocumentArrowUpIcon, 
+    BookOpenIcon,
+    ChevronRightIcon,
+    SparklesIcon,
+    CheckCircleIcon,
+    XCircleIcon,
+    ArrowPathIcon,
+    HomeIcon
+} from '@heroicons/react/24/solid';
 
 // --- Reusable Progress Indicator Component ---
 const ProgressIndicator = ({ progress, step }) => (
@@ -35,711 +34,756 @@ const ProgressIndicator = ({ progress, step }) => (
     </motion.div>
 );
 
-const backend = import.meta.env.VITE_URL || 'http://localhost:3000';
+const QuizPage = ({ isSidebarOpen }) => { // Add isSidebarOpen prop
+    // --- State Management ---
+    const [prompt, setPrompt] = useState('Create a 5 question quiz on the key topics.');
+    const [pdfFile, setPdfFile] = useState(null);
+    const [fileName, setFileName] = useState('');
+    const [savedQuizzes, setSavedQuizzes] = useState([]);
+    const [currentQuiz, setCurrentQuiz] = useState(null);
+    const [quizResults, setQuizResults] = useState(null);
+    
+    // UI State
+    const [isLoading, setIsLoading] = useState(false);
+    const [progress, setProgress] = useState(0);
+    const [step, setStep] = useState('');
+    const [error, setError] = useState(null);
+    const [view, setView] = useState('generate'); // 'generate', 'take_quiz', 'results'
 
-const QuizPage = () => {
-  const [file, setFile] = useState(null);
-  const [fileId, setFileId] = useState(null);
-  const [prompt, setPrompt] = useState('');
-  const [quiz, setQuiz] = useState(null);
-  const [currentQuestion, setCurrentQuestion] = useState(0);
-  const [userAnswers, setUserAnswers] = useState([]);
-  const [showResults, setShowResults] = useState(false);
-  const [results, setResults] = useState(null);
-  const [savedQuizzes, setSavedQuizzes] = useState([]);
-  const [isUploading, setIsUploading] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [generateProgress, setGenerateProgress] = useState(0);
-  const [error, setError] = useState('');
-  const [selectedAnswer, setSelectedAnswer] = useState(null);
+    // Authentication check state
+    const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+const backend=import.meta.env.VITE_URL||'http://localhost:3000'
+    const backendUrl = `${backend}/api/quizzes`;
 
-  // Get auth token
-  const getAuthToken = () => {
-    return localStorage.getItem('token');
-  };
-
-  // Get auth headers
-  const getAuthHeaders = () => {
-    const token = getAuthToken();
-    return {
-      'Authorization': `Bearer ${token}`
+    // Helper function to get auth headers
+    const getAuthHeaders = () => {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            throw new Error('No authentication token found');
+        }
+        return {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+        };
     };
-  };
 
-  // Fetch saved quizzes on component mount
-  useEffect(() => {
-    fetchSavedQuizzes();
-  }, []);
+    // Helper function to handle auth errors
+    const handleAuthError = (response) => {
+        if (response.status === 401) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            setError('Session expired. Please log in again.');
+            // Redirect to login after a delay
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
+            return true;
+        }
+        return false;
+    };
 
-  const fetchSavedQuizzes = async () => {
-    try {
-      const token = getAuthToken();
-      if (!token) {
-        console.log('No auth token found');
-        return;
-      }
-
-      const response = await fetch(`${backend}/api/quizzes`, {
-        headers: getAuthHeaders()
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setSavedQuizzes(data);
-      } else if (response.status === 401) {
-        setError('Session expired. Please login again.');
-      }
-    } catch (error) {
-      console.error('Error fetching quizzes:', error);
-    }
-  };
-
-  const handleFileUpload = async (e) => {
-    const uploadedFile = e.target.files[0];
-    if (!uploadedFile) return;
-
-    if (uploadedFile.type !== 'application/pdf') {
-      setError('Please upload a PDF file');
-      return;
-    }
-
-    setFile(uploadedFile);
-    setIsUploading(true);
-    setUploadProgress(0);
-    setError('');
-
-    const progressInterval = setInterval(() => {
-      setUploadProgress(prev => Math.min(prev + 10, 90));
-    }, 200);
-
-    const formData = new FormData();
-    formData.append('file', uploadedFile);
-
-    try {
-      const response = await fetch(`${backend}/api/quizzes/upload`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: formData,
-      });
-
-      clearInterval(progressInterval);
-
-      if (response.ok) {
-        const data = await response.json();
-        setFileId(data.fileId);
-        setUploadProgress(100);
-        setTimeout(() => {
-          setIsUploading(false);
-          setUploadProgress(0);
-        }, 500);
-      } else if (response.status === 401) {
-        setError('Session expired. Please login again.');
-        setIsUploading(false);
-      } else {
-        const errorData = await response.json();
-        setError(errorData.message || 'Failed to upload file');
-        setIsUploading(false);
-      }
-    } catch (error) {
-      clearInterval(progressInterval);
-      console.error('Upload error:', error);
-      setError('Network error. Please try again.');
-      setIsUploading(false);
-    }
-  };
-
-  const handleGenerateQuiz = async () => {
-    if (!fileId || !prompt.trim()) {
-      setError('Please upload a file and enter a prompt');
-      return;
-    }
-
-    setIsGenerating(true);
-    setGenerateProgress(0);
-    setError('');
-
-    const progressInterval = setInterval(() => {
-      setGenerateProgress(prev => Math.min(prev + 5, 90));
-    }, 500);
-
-    try {
-      const response = await fetch(`${backend}/api/quizzes/generate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        },
-        body: JSON.stringify({ fileId, prompt }),
-      });
-
-      clearInterval(progressInterval);
-
-      if (response.ok) {
-        const data = await response.json();
-        setQuiz(data);
-        setUserAnswers(new Array(data.questions.length).fill(null));
-        setGenerateProgress(100);
-        fetchSavedQuizzes();
-        setTimeout(() => {
-          setIsGenerating(false);
-          setGenerateProgress(0);
-        }, 500);
-      } else if (response.status === 401) {
-        setError('Session expired. Please login again.');
-        setIsGenerating(false);
-      } else {
-        const errorData = await response.json();
-        setError(errorData.message || 'Failed to generate quiz');
-        setIsGenerating(false);
-      }
-    } catch (error) {
-      clearInterval(progressInterval);
-      console.error('Generation error:', error);
-      setError('Network error. Please try again.');
-      setIsGenerating(false);
-    }
-  };
-
-  const handleAnswerSelect = (answerIndex) => {
-    setSelectedAnswer(answerIndex);
-    const newAnswers = [...userAnswers];
-    newAnswers[currentQuestion] = answerIndex;
-    setUserAnswers(newAnswers);
-  };
-
-  const handleNextQuestion = () => {
-    setSelectedAnswer(null);
-    if (currentQuestion < quiz.questions.length - 1) {
-      setCurrentQuestion(currentQuestion + 1);
-      setSelectedAnswer(userAnswers[currentQuestion + 1]);
-    }
-  };
-
-  const handlePreviousQuestion = () => {
-    setSelectedAnswer(null);
-    if (currentQuestion > 0) {
-      setCurrentQuestion(currentQuestion - 1);
-      setSelectedAnswer(userAnswers[currentQuestion - 1]);
-    }
-  };
-
-  const handleSubmitQuiz = async () => {
-    if (userAnswers.some(answer => answer === null)) {
-      setError('Please answer all questions before submitting');
-      return;
-    }
-
-    setIsSubmitting(true);
-    setError('');
-
-    const formattedAnswers = userAnswers.map((answer, index) => ({
-      questionIndex: index,
-      selectedAnswerIndex: answer,
-    }));
-
-    try {
-      const response = await fetch(`${backend}/api/quizzes/${quiz._id}/attempt`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        },
-        body: JSON.stringify({ answers: formattedAnswers }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setResults(data);
-        setShowResults(true);
-      } else if (response.status === 401) {
-        setError('Session expired. Please login again.');
-      } else {
-        const errorData = await response.json();
-        setError(errorData.message || 'Failed to submit quiz');
-      }
-    } catch (error) {
-      console.error('Submit error:', error);
-      setError('Network error. Please try again.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleLoadQuiz = (savedQuiz) => {
-    setQuiz(savedQuiz);
-    setUserAnswers(new Array(savedQuiz.questions.length).fill(null));
-    setCurrentQuestion(0);
-    setShowResults(false);
-    setSelectedAnswer(null);
-    setError('');
-  };
-
-  const handleStartNewQuiz = () => {
-    setFile(null);
-    setFileId(null);
-    setPrompt('');
-    setQuiz(null);
-    setCurrentQuestion(0);
-    setUserAnswers([]);
-    setShowResults(false);
-    setResults(null);
-    setSelectedAnswer(null);
-    setError('');
-  };
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4 md:p-8">
-      <div className="max-w-7xl mx-auto">
-        <motion.h1
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-4xl md:text-5xl font-bold text-white mb-8 text-center bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text text-transparent"
-        >
-          Interactive Quiz
-        </motion.h1>
-
-        {error && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-6 p-4 bg-red-500/10 border border-red-400/30 rounded-xl flex items-center gap-3"
-          >
-            <ExclamationCircleIcon className="h-6 w-6 text-red-400 flex-shrink-0" />
-            <p className="text-red-300">{error}</p>
-          </motion.div>
-        )}
-
-        <AnimatePresence mode="wait">
-          {!quiz && !showResults && (
-            <QuizSetup
-              file={file}
-              fileId={fileId}
-              prompt={prompt}
-              setPrompt={setPrompt}
-              handleFileUpload={handleFileUpload}
-              handleGenerateQuiz={handleGenerateQuiz}
-              savedQuizzes={savedQuizzes}
-              handleLoadQuiz={handleLoadQuiz}
-              isUploading={isUploading}
-              isGenerating={isGenerating}
-              uploadProgress={uploadProgress}
-              generateProgress={generateProgress}
-            />
-          )}
-
-          {quiz && !showResults && (
-            <QuizViewer
-              quiz={quiz}
-              currentQuestion={currentQuestion}
-              userAnswers={userAnswers}
-              selectedAnswer={selectedAnswer}
-              handleAnswerSelect={handleAnswerSelect}
-              handlePreviousQuestion={handlePreviousQuestion}
-              handleNextQuestion={handleNextQuestion}
-              handleSubmitQuiz={handleSubmitQuiz}
-              isSubmitting={isSubmitting}
-            />
-          )}
-
-          {showResults && results && (
-            <QuizResults
-              results={results}
-              quiz={quiz}
-              userAnswers={userAnswers}
-              handleStartNewQuiz={handleStartNewQuiz}
-            />
-          )}
-        </AnimatePresence>
-      </div>
-    </div>
-  );
-};
-
-// --- Sub-Components ---
-const QuizSetup = ({
-  file,
-  fileId,
-  prompt,
-  setPrompt,
-  handleFileUpload,
-  handleGenerateQuiz,
-  savedQuizzes,
-  handleLoadQuiz,
-  isUploading,
-  isGenerating,
-  uploadProgress,
-  generateProgress,
-}) => (
-  <motion.div
-    initial={{ opacity: 0, scale: 0.95 }}
-    animate={{ opacity: 1, scale: 1 }}
-    exit={{ opacity: 0, scale: 0.95 }}
-    className="grid grid-cols-1 lg:grid-cols-2 gap-8"
-  >
-    <div className="space-y-6">
-      <motion.div
-        className="bg-white/5 backdrop-blur-xl rounded-3xl p-8 border border-white/10 shadow-2xl"
-        whileHover={{ scale: 1.01 }}
-      >
-        <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
-          <SparklesIcon className="h-7 w-7 text-cyan-400" />
-          Create New Quiz
-        </h2>
-
-        <div className="space-y-6">
-          <div>
-            <label className="block text-slate-300 mb-3 font-medium">Upload PDF</label>
-            <label
-              htmlFor="pdf-upload"
-              className={`
-                flex flex-col items-center justify-center w-full h-40 
-                border-2 border-dashed rounded-2xl cursor-pointer
-                transition-all duration-300
-                ${file
-                  ? 'border-cyan-400 bg-cyan-400/10'
-                  : 'border-slate-600 hover:border-cyan-400 bg-white/5 hover:bg-white/10'
+    // --- Data Fetching ---
+    useEffect(() => {
+        const fetchQuizzes = async () => {
+            try {
+                const token = localStorage.getItem('token');
+                if (!token) {
+                    setError('User not authenticated');
+                    return;
                 }
-              `}
-            >
-              <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                <DocumentArrowUpIcon className={`h-12 w-12 mb-3 ${file ? 'text-cyan-400' : 'text-slate-400'}`} />
-                <p className="text-sm text-slate-300 mb-1">
-                  {file ? file.name : 'Click to upload PDF'}
-                </p>
-                <p className="text-xs text-slate-500">PDF files only</p>
-              </div>
-              <input
-                id="pdf-upload"
-                type="file"
-                className="hidden"
-                accept=".pdf"
-                onChange={handleFileUpload}
-                disabled={isUploading}
-              />
-            </label>
-            {isUploading && (
-              <ProgressIndicator
-                progress={uploadProgress}
-                step="Uploading PDF..."
-              />
-            )}
-          </div>
 
-          <div>
-            <label className="block text-slate-300 mb-3 font-medium">Quiz Topic/Prompt</label>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="E.g., Create a quiz on machine learning fundamentals"
-              className="w-full bg-white/5 border border-white/20 rounded-2xl p-4 text-white placeholder-slate-500 focus:ring-2 focus:ring-cyan-400/50 focus:border-cyan-400/50 focus:outline-none transition-all resize-none"
-              rows="4"
-              disabled={isGenerating}
-            />
-          </div>
+                const headers = getAuthHeaders();
+                const response = await fetch(backendUrl, { headers });
 
-          <motion.button
-            onClick={handleGenerateQuiz}
-            disabled={!fileId || !prompt.trim() || isUploading || isGenerating}
-            className="w-full bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 text-white py-4 rounded-2xl font-bold hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
-            whileHover={{ scale: isGenerating ? 1 : 1.02 }}
-            whileTap={{ scale: isGenerating ? 1 : 0.98 }}
-          >
-            {isGenerating ? (
-              <>
-                <ArrowPathIcon className="h-5 w-5 animate-spin" />
-                Generating...
-              </>
-            ) : (
-              <>
-                <SparklesIcon className="h-5 w-5" />
-                Generate Quiz
-              </>
-            )}
-          </motion.button>
+                if (handleAuthError(response)) return;
 
-          {isGenerating && (
-            <ProgressIndicator
-              progress={generateProgress}
-              step="AI is crafting your quiz..."
-            />
-          )}
-        </div>
-      </motion.div>
-    </div>
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch quizzes: ${response.status}`);
+                }
 
-    <SavedQuizzesList quizzes={savedQuizzes} onLoad={handleLoadQuiz} />
-  </motion.div>
-);
+                const data = await response.json();
+                setSavedQuizzes(data || []);
+                setError(null);
+            } catch (err) {
+                console.error('Error fetching quizzes:', err);
+                if (err.message.includes('authentication')) {
+                    setError('Authentication required. Please log in again.');
+                } else {
+                    setError('Could not load your saved quizzes. Please try refreshing the page.');
+                }
+            }
+        };
 
-const SavedQuizzesList = ({ quizzes, onLoad }) => (
-  <motion.div
-    className="bg-white/5 backdrop-blur-xl rounded-3xl p-8 border border-white/10 shadow-2xl"
-    initial={{ opacity: 0, x: 20 }}
-    animate={{ opacity: 1, x: 0 }}
-  >
-    <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
-      <BookOpenIcon className="h-7 w-7 text-purple-400" />
-      Saved Quizzes
-    </h2>
+        if (isAuthenticated) {
+            fetchQuizzes();
+        }
+    }, [isAuthenticated]); // Changed from user dependency
 
-    <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-      {quizzes.length === 0 ? (
-        <p className="text-slate-400 text-center py-8">No saved quizzes yet</p>
-      ) : (
-        quizzes.map((quiz) => (
-          <motion.div
-            key={quiz._id}
-            className="bg-white/5 rounded-xl p-5 border border-white/10 hover:bg-white/10 transition-all cursor-pointer"
-            whileHover={{ scale: 1.02, x: 5 }}
-            onClick={() => onLoad(quiz)}
-          >
-            <div className="flex justify-between items-start mb-3">
-              <h3 className="text-white font-semibold line-clamp-2">{quiz.topic}</h3>
-              <span className="text-cyan-400 text-sm font-mono bg-cyan-400/10 px-2 py-1 rounded">
-                {quiz.questions.length}Q
-              </span>
+    // --- Event Handlers ---
+    const handleFileChange = (e) => {
+        const file = e.target.files[0];
+        if (file && file.type === "application/pdf") {
+            setPdfFile(file);
+            setFileName(file.name);
+            setError(null);
+        } else {
+            setPdfFile(null);
+            setFileName('');
+            setError("Please select a valid PDF file.");
+        }
+    };
+
+    const handleGenerateQuiz = async () => {
+        if (!prompt || !pdfFile) {
+            setError("Please upload a PDF and provide instructions.");
+            return;
+        }
+
+        const token = localStorage.getItem('token');
+        if (!token) {
+            setError("Authentication required. Please log in again.");
+            return;
+        }
+        
+        setIsLoading(true);
+        setError(null);
+        setProgress(0);
+        setStep('');
+        
+        try {
+            // Step 1: Upload PDF
+            setStep('Uploading PDF document...');
+            setProgress(25);
+            
+            const formData = new FormData();
+            formData.append('file', pdfFile);
+            
+            const uploadRes = await fetch(`${backendUrl}/upload`, { 
+                method: 'POST', 
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                },
+                body: formData 
+            });
+            
+            if (handleAuthError(uploadRes)) return;
+            
+            if (!uploadRes.ok) {
+                const errorText = await uploadRes.text();
+                throw new Error(`PDF upload failed: ${errorText}`);
+            }
+            
+            const uploadData = await uploadRes.json();
+            const { fileId } = uploadData;
+
+            if (!fileId) {
+                throw new Error('No file ID received from server');
+            }
+
+            // Step 2: Generate Quiz
+            setStep('Generating quiz with AI...');
+            setProgress(65);
+            
+            const headers = getAuthHeaders();
+            const genRes = await fetch(`${backendUrl}/generate`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ fileId, prompt }),
+            });
+            
+            if (handleAuthError(genRes)) return;
+            
+            if (!genRes.ok) {
+                const errorText = await genRes.text();
+                throw new Error(`Quiz generation failed: ${errorText}`);
+            }
+            
+            const newQuiz = await genRes.json();
+            
+            // Validate quiz structure
+            if (!newQuiz || !newQuiz.questions || !Array.isArray(newQuiz.questions)) {
+                throw new Error('Invalid quiz format received from server');
+            }
+            
+            // Step 3: Complete
+            setStep('Quiz generated successfully!');
+            setProgress(100);
+            
+            setTimeout(() => {
+                setSavedQuizzes(prev => [newQuiz, ...prev]);
+                handleStartQuiz(newQuiz);
+                setProgress(0);
+                setStep('');
+            }, 1000);
+
+        } catch (err) {
+            console.error('Quiz generation error:', err);
+            if (err.message.includes('authentication')) {
+                setError('Session expired. Please log in again.');
+            } else {
+                setError(err.message || "An unexpected error occurred.");
+            }
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleStartQuiz = (quiz) => {
+        if (!quiz || !quiz.questions || quiz.questions.length === 0) {
+            setError('Invalid quiz data');
+            return;
+        }
+        setCurrentQuiz(quiz);
+        setQuizResults(null);
+        setError(null);
+        setView('take_quiz');
+    };
+    
+    const handleSubmitQuiz = async (answers) => {
+        if (!currentQuiz || !currentQuiz._id) {
+            setError('No quiz selected');
+            return;
+        }
+
+        const token = localStorage.getItem('token');
+        if (!token) {
+            setError("Authentication required. Please log in again.");
+            return;
+        }
+        
+        try {
+            setIsLoading(true);
+            
+            // Validate answers format
+            if (!answers || !Array.isArray(answers)) {
+                throw new Error('Invalid answers format');
+            }
+
+            const headers = getAuthHeaders();
+            const response = await fetch(`${backendUrl}/${currentQuiz._id}/submit`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ 
+                    answers
+                    // No userId needed - backend extracts from JWT
+                })
+            });
+
+            if (handleAuthError(response)) return;
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Failed to submit quiz: ${errorText}`);
+            }
+            
+            const resultsData = await response.json();
+            
+            if (!resultsData) {
+                throw new Error('No results received from server');
+            }
+            
+            setQuizResults(resultsData);
+            setView('results');
+            setError(null);
+            
+        } catch (err) {
+            console.error('Quiz submission error:', err);
+            if (err.message.includes('authentication')) {
+                setError('Session expired. Please log in again.');
+            } else {
+                setError(err.message || "Could not submit your quiz. Please try again.");
+            }
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const resetToGenerator = () => {
+        setView('generate');
+        setCurrentQuiz(null);
+        setQuizResults(null);
+        setError(null);
+        // Don't reset PDF file and filename to preserve user's upload
+    };
+
+    // Check if user is authenticated
+    useEffect(() => {
+        const token = localStorage.getItem('token');
+        setIsAuthenticated(!!token);
+        setIsCheckingAuth(false);
+    }, []);
+
+    // Replace the user authentication check
+    if (isCheckingAuth) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="text-white">Checking authentication...</div>
             </div>
-            <p className="text-slate-400 text-sm flex items-center gap-2">
-              <ClockIcon className="h-4 w-4" />
-              {new Date(quiz.createdAt).toLocaleDateString()}
-            </p>
-          </motion.div>
-        ))
-      )}
-    </div>
-  </motion.div>
-);
+        );
+    }
 
-const QuizViewer = ({
-  quiz,
-  currentQuestion,
-  userAnswers,
-  selectedAnswer,
-  handleAnswerSelect,
-  handlePreviousQuestion,
-  handleNextQuestion,
-  handleSubmitQuiz,
-  isSubmitting,
-}) => {
-  const question = quiz.questions[currentQuestion];
-  const progress = ((currentQuestion + 1) / quiz.questions.length) * 100;
+    if (!isAuthenticated) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="bg-white/5 backdrop-blur-xl p-8 rounded-3xl border border-white/10 shadow-2xl text-center">
+                    <h2 className="text-2xl font-bold text-white mb-4">Authentication Required</h2>
+                    <p className="text-slate-300 mb-6">Please log in to access the Quiz Builder.</p>
+                    <button 
+                        onClick={() => window.location.href = '/login'}
+                        className="px-6 py-3 bg-gradient-to-r from-cyan-500 to-purple-600 text-white rounded-lg hover:from-cyan-600 hover:to-purple-700 transition-all"
+                    >
+                        Go to Login
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      className="max-w-4xl mx-auto"
-    >
-      <div className="bg-white/5 backdrop-blur-xl rounded-3xl p-8 border border-white/10 shadow-2xl">
-        <div className="mb-8">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-white text-xl font-semibold">
-              Question {currentQuestion + 1} of {quiz.questions.length}
-            </h2>
-            <span className="text-cyan-400 font-mono">{Math.round(progress)}%</span>
-          </div>
-          <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
-            <motion.div
-              className="h-full bg-gradient-to-r from-cyan-400 to-purple-500"
-              initial={{ width: 0 }}
-              animate={{ width: `${progress}%` }}
-              transition={{ duration: 0.3 }}
-            />
-          </div>
-        </div>
-
-        <div className="mb-8">
-          <h3 className="text-white text-2xl font-bold mb-6">{question.questionText}</h3>
-
-          <div className="space-y-4">
-            {question.options.map((option, index) => (
-              <motion.button
-                key={index}
-                onClick={() => handleAnswerSelect(index)}
-                className={`
-                  w-full text-left p-5 rounded-xl border-2 transition-all
-                  ${selectedAnswer === index
-                    ? 'border-cyan-400 bg-cyan-400/20'
-                    : 'border-white/20 bg-white/5 hover:bg-white/10'
-                  }
-                `}
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-              >
-                <span className="text-white font-medium">{option}</span>
-              </motion.button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex justify-between items-center gap-4">
-          <motion.button
-            onClick={handlePreviousQuestion}
-            disabled={currentQuestion === 0}
-            className="px-6 py-3 bg-white/10 text-white rounded-xl hover:bg-white/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            whileHover={{ scale: currentQuestion === 0 ? 1 : 1.05 }}
-          >
-            Previous
-          </motion.button>
-
-          {currentQuestion === quiz.questions.length - 1 ? (
-            <motion.button
-              onClick={handleSubmitQuiz}
-              disabled={isSubmitting || userAnswers.some(a => a === null)}
-              className="px-8 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-bold hover:shadow-2xl hover:shadow-green-500/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              whileHover={{ scale: isSubmitting ? 1 : 1.05 }}
+    // --- Main Render Logic ---
+    return (
+        <div className={`min-h-screen transition-all duration-300`}>
+            <motion.div 
+                initial={{ opacity: 0, y: -20 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                className="text-center mb-12"
             >
-              {isSubmitting ? (
-                <>
-                  <ArrowPathIcon className="h-5 w-5 animate-spin" />
-                  Submitting...
-                </>
-              ) : (
-                <>
-                  <CheckCircleIcon className="h-5 w-5" />
-                  Submit Quiz
-                </>
-              )}
-            </motion.button>
-          ) : (
-            <motion.button
-              onClick={handleNextQuestion}
-              className="px-6 py-3 bg-gradient-to-r from-cyan-500 to-purple-600 text-white rounded-xl font-bold hover:shadow-2xl hover:shadow-purple-500/25 transition-all"
-              whileHover={{ scale: 1.05 }}
-            >
-              Next
-            </motion.button>
-          )}
+                <h1 className="text-4xl md:text-5xl font-extrabold mb-4 bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
+                    Interactive Quiz Builder
+                </h1>
+                <p className="text-xl text-slate-300 font-light">
+                    Generate engaging quizzes from your documents in seconds.
+                </p>
+            </motion.div>
+
+            <div className={`max-w-7xl mx-auto transition-all duration-300 ${isSidebarOpen ? 'px-4' : 'px-6'}`}>
+                <AnimatePresence mode="wait">
+                    {view === 'generate' && (
+                        <motion.div 
+                            key="generate"
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className={`grid grid-cols-1 ${isSidebarOpen ? 'lg:grid-cols-2' : 'xl:grid-cols-2'} gap-10 items-start transition-all duration-300`}
+                        >
+                            {/* Left Panel: Generator */}
+                            <div className="bg-white/5 backdrop-blur-xl p-8 rounded-3xl border border-white/10 shadow-2xl space-y-8">
+                                {/* Upload Section */}
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-3 mb-6">
+                                        <div className="w-8 h-8 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 flex items-center justify-center text-white font-bold text-sm">1</div>
+                                        <h3 className="text-2xl font-bold text-cyan-300">Upload Document</h3>
+                                    </div>
+                                    
+                                    <motion.label 
+                                        htmlFor="pdf-upload" 
+                                        className={`group relative w-full border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all duration-500 ${
+                                            pdfFile 
+                                                ? 'bg-gradient-to-br from-emerald-500/10 to-green-500/10 border-emerald-400/50 shadow-lg shadow-emerald-500/20' 
+                                                : 'bg-gradient-to-br from-white/5 to-white/10 border-white/20 hover:border-cyan-400/70 hover:shadow-lg hover:shadow-cyan-500/20'
+                                        }`}
+                                        whileHover={{ scale: 1.02 }}
+                                        whileTap={{ scale: 0.98 }}
+                                    >
+                                        <div className="relative z-10">
+                                            {pdfFile ? (
+                                                <CheckCircleIcon className="h-16 w-16 mx-auto mb-4 text-emerald-400" />
+                                            ) : (
+                                                <DocumentArrowUpIcon className="h-16 w-16 mx-auto mb-4 text-slate-400 group-hover:text-cyan-400 transition-colors" />
+                                            )}
+                                            
+                                            <div className="space-y-2">
+                                                <h4 className="text-xl font-semibold text-white">
+                                                    {fileName || 'Choose PDF File'}
+                                                </h4>
+                                                
+                                                {pdfFile ? (
+                                                    <div className="text-emerald-400 font-medium flex items-center justify-center gap-2">
+                                                        <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                                                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                        </svg>
+                                                        File ready for processing
+                                                    </div>
+                                                ) : (
+                                                    <p className="text-slate-400">Drag & drop or click to select</p>
+                                                )}
+                                                
+                                                <p className="text-xs text-slate-500 mt-2">
+                                                    Maximum file size: 10MB • PDF format only
+                                                </p>
+                                            </div>
+                                        </div>
+                                        
+                                        <input 
+                                            id="pdf-upload" 
+                                            type="file" 
+                                            accept="application/pdf" 
+                                            className="hidden" 
+                                            onChange={handleFileChange} 
+                                        />
+                                    </motion.label>
+                                </div>
+
+                                {/* Instructions Section */}
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-3 mb-6">
+                                        <div className="w-8 h-8 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-sm">2</div>
+                                        <h3 className="text-2xl font-bold text-purple-300">Customize Instructions</h3>
+                                    </div>
+                                    
+                                    <div className="relative">
+                                        <textarea 
+                                            value={prompt} 
+                                            onChange={(e) => setPrompt(e.target.value)} 
+                                            className="w-full bg-white/5 border border-white/20 rounded-xl p-4 text-white placeholder-slate-400 focus:ring-2 focus:ring-purple-500/50 focus:border-purple-400/50 focus:outline-none transition-all duration-300 resize-none min-h-[120px] text-lg leading-relaxed" 
+                                            placeholder="Describe what type of quiz you want to create..."
+                                        />
+                                        <div className="absolute bottom-3 right-3 text-xs text-slate-500">
+                                            {prompt.length}/500
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Generate Button */}
+                                <motion.button 
+                                    onClick={handleGenerateQuiz} 
+                                    disabled={isLoading || !pdfFile} 
+                                    className="w-full bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 text-white p-5 rounded-2xl text-xl font-bold flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-2xl hover:shadow-purple-500/25 transition-all duration-500 relative overflow-hidden"
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                >
+                                    <div className="relative z-10 flex items-center gap-3">
+                                        {isLoading ? (
+                                            <>
+                                                <div className="w-6 h-6 border-2 border-t-transparent border-white rounded-full animate-spin"></div>
+                                                <span>Generating Quiz...</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <SparklesIcon className="h-7 w-7" />
+                                                <span>Generate Quiz</span>
+                                            </>
+                                        )}
+                                    </div>
+                                </motion.button>
+
+                                {/* Progress Indicator */}
+                                <AnimatePresence>
+                                    {isLoading && (
+                                        <ProgressIndicator progress={progress} step={step} />
+                                    )}
+                                </AnimatePresence>
+
+                                {/* Error Display */}
+                                <AnimatePresence>
+                                    {error && (
+                                        <motion.div 
+                                            initial={{ opacity: 0, scale: 0.95 }}
+                                            animate={{ opacity: 1, scale: 1 }}
+                                            exit={{ opacity: 0, scale: 0.95 }}
+                                            className="p-4 bg-red-500/10 border border-red-400/30 rounded-xl flex items-start gap-3"
+                                        >
+                                            <XCircleIcon className="h-6 w-6 text-red-400 flex-shrink-0 mt-0.5" />
+                                            <div>
+                                                <p className="text-red-300 font-semibold">
+                                                    {error.includes('authentication') || error.includes('Session expired') ? 'Authentication Error' : 'Generation Failed'}
+                                                </p>
+                                                <p className="text-red-200/80 text-sm mt-1">{error}</p>
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+
+                            {/* Right Panel: Saved Quizzes */}
+                            <div className="bg-white/5 backdrop-blur-xl p-8 rounded-3xl border border-white/10 shadow-2xl min-h-[600px]">
+                                <h3 className="text-2xl font-bold mb-8 bg-gradient-to-r from-cyan-300 to-purple-300 bg-clip-text text-transparent">
+                                    Saved Quizzes
+                                </h3>
+                                <SavedQuizzesList quizzes={savedQuizzes} onStart={handleStartQuiz} />
+                            </div>
+                        </motion.div>
+                    )}
+
+                    {view === 'take_quiz' && currentQuiz && (
+                        <motion.div 
+                            key="take_quiz" 
+                            initial={{ opacity: 0, x: 100 }} 
+                            animate={{ opacity: 1, x: 0 }} 
+                            exit={{ opacity: 0, x: -100 }}
+                        >
+                            <Quizzer quiz={currentQuiz} onSubmit={handleSubmitQuiz} onBack={resetToGenerator} isLoading={isLoading} />
+                        </motion.div>
+                    )}
+                    
+                    {view === 'results' && quizResults && currentQuiz && (
+                        <motion.div 
+                            key="results" 
+                            initial={{ opacity: 0, scale: 0.9 }} 
+                            animate={{ opacity: 1, scale: 1 }} 
+                            exit={{ opacity: 0, scale: 1.1 }}
+                        >
+                            <QuizResults 
+                                results={quizResults} 
+                                quiz={currentQuiz} 
+                                onRestart={() => handleStartQuiz(currentQuiz)} 
+                                onHome={resetToGenerator} 
+                            />
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </div>
         </div>
-      </div>
-    </motion.div>
-  );
+    );
 };
 
-const QuizResults = ({ results, quiz, userAnswers, handleStartNewQuiz }) => {
-  const percentage = (results.score / results.totalQuestions) * 100;
+// --- Sub-Components (unchanged except for better error handling) ---
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      className="max-w-4xl mx-auto space-y-6"
-    >
-      <div className="bg-white/5 backdrop-blur-xl rounded-3xl p-8 border border-white/10 shadow-2xl text-center">
-        <motion.div
-          initial={{ scale: 0 }}
-          animate={{ scale: 1 }}
-          transition={{ type: 'spring', stiffness: 200 }}
-          className="inline-block"
-        >
-          {percentage >= 70 ? (
-            <CheckCircleIcon className="h-24 w-24 text-green-400 mx-auto mb-4" />
-          ) : (
-            <XCircleIcon className="h-24 w-24 text-red-400 mx-auto mb-4" />
-          )}
-        </motion.div>
+const SavedQuizzesList = ({ quizzes, onStart }) => {
+    if (!quizzes || !quizzes.length) {
+        return (
+            <div className="text-center py-16">
+                <BookOpenIcon className="h-24 w-24 mx-auto text-slate-500/50 mb-6" />
+                <p className="text-slate-400 text-xl mb-2">No quizzes created yet</p>
+                <p className="text-slate-500">Generate your first quiz to get started!</p>
+            </div>
+        );
+    }
 
-        <h2 className="text-4xl font-bold text-white mb-4">
-          {percentage >= 70 ? 'Great Job!' : 'Keep Practicing!'}
-        </h2>
-
-        <div className="flex justify-center items-center gap-8 my-8">
-          <div className="text-center">
-            <p className="text-6xl font-bold text-cyan-400">{results.score}</p>
-            <p className="text-slate-400 mt-2">Correct</p>
-          </div>
-          <div className="text-slate-600 text-4xl">/</div>
-          <div className="text-center">
-            <p className="text-6xl font-bold text-slate-400">{results.totalQuestions}</p>
-            <p className="text-slate-400 mt-2">Total</p>
-          </div>
-        </div>
-
-        <div className="mb-8">
-          <div className="w-full bg-slate-800 rounded-full h-4 overflow-hidden">
-            <motion.div
-              className={`h-full ${
-                percentage >= 70
-                  ? 'bg-gradient-to-r from-green-400 to-emerald-500'
-                  : 'bg-gradient-to-r from-orange-400 to-red-500'
-              }`}
-              initial={{ width: 0 }}
-              animate={{ width: `${percentage}%` }}
-              transition={{ duration: 1, ease: 'easeOut' }}
-            />
-          </div>
-          <p className="text-slate-400 mt-2">{percentage.toFixed(1)}% Score</p>
-        </div>
-
-        <motion.button
-          onClick={handleStartNewQuiz}
-          className="bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 text-white px-10 py-4 rounded-2xl font-bold hover:shadow-2xl hover:shadow-purple-500/25 transition-all"
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-        >
-          Start New Quiz
-        </motion.button>
-      </div>
-
-      <div className="bg-white/5 backdrop-blur-xl rounded-3xl p-8 border border-white/10 shadow-2xl">
-        <h3 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
-          <ChartBarIcon className="h-7 w-7 text-purple-400" />
-          Answer Review
-        </h3>
-
-        <div className="space-y-6">
-          {quiz.questions.map((question, index) => {
-            const userAnswer = userAnswers[index];
-            const isCorrect = userAnswer === question.correctAnswerIndex;
-
-            return (
-              <div
-                key={index}
-                className={`p-6 rounded-xl border-2 ${
-                  isCorrect
-                    ? 'border-green-400/30 bg-green-400/10'
-                    : 'border-red-400/30 bg-red-400/10'
-                }`}
-              >
-                <div className="flex items-start gap-3 mb-4">
-                  {isCorrect ? (
-                    <CheckCircleIcon className="h-6 w-6 text-green-400 flex-shrink-0 mt-1" />
-                  ) : (
-                    <XCircleIcon className="h-6 w-6 text-red-400 flex-shrink-0 mt-1" />
-                  )}
-                  <div className="flex-1">
-                    <p className="text-white font-semibold mb-2">
-                      Question {index + 1}: {question.questionText}
-                    </p>
-                    <div className="space-y-2">
-                      <p className="text-slate-300">
-                        <span className="font-medium">Your answer:</span>{' '}
-                        <span className={isCorrect ? 'text-green-400' : 'text-red-400'}>
-                          {question.options[userAnswer]}
-                        </span>
-                      </p>
-                      {!isCorrect && (
-                        <p className="text-slate-300">
-                          <span className="font-medium">Correct answer:</span>{' '}
-                          <span className="text-green-400">
-                            {question.options[question.correctAnswerIndex]}
-                          </span>
-                        </p>
-                      )}
+    return (
+        <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
+            {quizzes.map((quiz, index) => (
+                <motion.button 
+                    key={quiz._id} 
+                    onClick={() => onStart(quiz)}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                    className="w-full text-left p-5 rounded-xl bg-gradient-to-r from-white/5 to-white/10 hover:from-white/10 hover:to-white/20 transition-all duration-300 flex items-center justify-between group border border-white/5 hover:border-white/20"
+                    whileHover={{ scale: 1.02 }}
+                >
+                    <div className="flex items-center gap-4 overflow-hidden">
+                        <div className="p-3 rounded-lg bg-gradient-to-br from-cyan-500/20 to-purple-500/20">
+                            <BookOpenIcon className="h-8 w-8 text-cyan-400" />
+                        </div>
+                        <div className="overflow-hidden">
+                            <p className="font-semibold text-lg truncate text-white group-hover:text-cyan-200 transition-colors">
+                                {quiz.topic}
+                            </p>
+                            <p className="text-sm text-slate-400 mt-1">
+                                {new Date(quiz.createdAt).toLocaleDateString()} • {quiz.questions?.length || 0} questions
+                            </p>
+                        </div>
                     </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+                    <ChevronRightIcon className="h-6 w-6 text-slate-500 group-hover:text-cyan-400 transition-colors"/>
+                </motion.button>
+            ))}
         </div>
-      </div>
-    </motion.div>
-  );
+    );
+};
+
+const Quizzer = ({ quiz, onSubmit, onBack, isLoading }) => {
+    const [currentIndex, setCurrentIndex] = useState(0);
+    const [selectedAnswers, setSelectedAnswers] = useState({});
+
+    const handleSelectAnswer = (questionIndex, answerIndex) => {
+        setSelectedAnswers(prev => ({ ...prev, [questionIndex]: answerIndex }));
+    };
+    
+    const handleFinish = () => {
+        if (isLoading) return;
+        
+        const formattedAnswers = Object.entries(selectedAnswers).map(([qIdx, aIdx]) => ({
+            questionIndex: parseInt(qIdx, 10),
+            selectedAnswerIndex: aIdx
+        }));
+        onSubmit(formattedAnswers);
+    };
+
+    const currentQuestion = quiz.questions[currentIndex];
+    const progress = ((currentIndex + 1) / quiz.questions.length) * 100;
+    
+    return (
+        <div className="bg-white/5 backdrop-blur-xl p-8 rounded-3xl border border-white/10 shadow-2xl max-w-4xl mx-auto">
+            <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold bg-gradient-to-r from-cyan-300 to-purple-300 bg-clip-text text-transparent">
+                    {quiz.topic}
+                </h2>
+                <button 
+                    onClick={onBack} 
+                    className="text-sm text-cyan-300 hover:text-cyan-100 font-medium px-3 py-2 rounded-lg hover:bg-white/10 transition-colors"
+                >
+                    ← Back to Generator
+                </button>
+            </div>
+
+            {/* Progress Bar */}
+            <div className="w-full bg-white/10 rounded-full h-2 mb-8">
+                <motion.div 
+                    className="h-2 rounded-full bg-gradient-to-r from-cyan-400 to-purple-500"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${progress}%` }}
+                    transition={{ duration: 0.3 }}
+                />
+            </div>
+            
+            {/* Question Text */}
+            <div className="bg-black/20 p-6 rounded-xl mb-8">
+                <p className="text-slate-400 text-sm mb-2">
+                    Question {currentIndex + 1} of {quiz.questions.length}
+                </p>
+                <p className="text-2xl font-bold text-white leading-relaxed">
+                    {currentQuestion.questionText}
+                </p>
+            </div>
+
+            {/* Options */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                {currentQuestion.options.map((option, index) => {
+                    const isSelected = selectedAnswers[currentIndex] === index;
+                    return (
+                        <motion.button
+                            key={index}
+                            onClick={() => handleSelectAnswer(currentIndex, index)}
+                            className={`p-4 rounded-xl text-left transition-all border-2 ${
+                                isSelected 
+                                    ? 'bg-cyan-500/20 border-cyan-400 shadow-lg shadow-cyan-500/25' 
+                                    : 'bg-white/5 border-transparent hover:border-white/20 hover:bg-white/10'
+                            }`}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className={`w-4 h-4 rounded-full border-2 ${
+                                    isSelected ? 'border-cyan-400 bg-cyan-400' : 'border-slate-400'
+                                }`} />
+                                <span className={`font-semibold text-lg ${
+                                    isSelected ? 'text-cyan-200' : 'text-white'
+                                }`}>
+                                    {option}
+                                </span>
+                            </div>
+                        </motion.button>
+                    );
+                })}
+            </div>
+            
+            {/* Navigation */}
+            <div className="flex justify-between items-center">
+                <button 
+                    onClick={() => setCurrentIndex(p => Math.max(0, p - 1))} 
+                    disabled={currentIndex === 0} 
+                    className="px-6 py-2 rounded-lg bg-white/10 disabled:opacity-50 text-white hover:bg-white/20 transition-colors"
+                >
+                    Previous
+                </button>
+                
+                {currentIndex === quiz.questions.length - 1 ? (
+                    <button 
+                        onClick={handleFinish} 
+                        disabled={isLoading}
+                        className="px-8 py-3 rounded-lg bg-gradient-to-r from-cyan-500 to-purple-500 text-white font-bold disabled:opacity-50 hover:shadow-lg transition-all"
+                    >
+                        {isLoading ? 'Submitting...' : 'Finish Quiz'}
+                    </button>
+                ) : (
+                    <button 
+                        onClick={() => setCurrentIndex(p => Math.min(quiz.questions.length - 1, p + 1))} 
+                        className="px-6 py-2 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors"
+                    >
+                        Next
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const QuizResults = ({ results, quiz, onRestart, onHome }) => {
+    if (!results || !quiz) {
+        return (
+            <div className="bg-white/5 backdrop-blur-xl p-8 rounded-3xl border border-white/10 shadow-2xl max-w-4xl mx-auto text-center">
+                <p className="text-red-400">Error: Missing results or quiz data</p>
+            </div>
+        );
+    }
+
+    const { score, totalQuestions, answers } = results;
+    const percentage = Math.round((score / totalQuestions) * 100);
+
+    return (
+        <div className="bg-white/5 backdrop-blur-xl p-8 rounded-3xl border border-white/10 shadow-2xl max-w-4xl mx-auto">
+            {/* Header and Score */}
+            <div className="text-center mb-8">
+                <h2 className="text-4xl font-extrabold mb-2 bg-gradient-to-r from-cyan-300 to-purple-300 bg-clip-text text-transparent">
+                    Quiz Complete!
+                </h2>
+                <p className="text-slate-300 text-lg">You scored</p>
+                <p className="text-7xl font-bold my-4 text-white">{score} / {totalQuestions}</p>
+                <p className="text-2xl font-semibold mb-4 text-slate-300">{percentage}%</p>
+                <div className="w-full bg-slate-800 rounded-full h-4 mt-4 overflow-hidden">
+                    <motion.div 
+                        className="h-4 rounded-full bg-gradient-to-r from-cyan-400 to-purple-500"
+                        initial={{ width: 0 }}
+                        animate={{ width: `${percentage}%` }}
+                        transition={{ duration: 1, ease: 'easeOut' }}
+                    />
+                </div>
+            </div>
+
+            {/* Answer Review */}
+            <div className="space-y-4 max-h-80 overflow-y-auto pr-3 mb-8">
+                {quiz.questions.map((question, index) => {
+                    const attempt = answers?.find(a => a.questionIndex === index);
+                    const userAnswerIndex = attempt ? attempt.selectedAnswerIndex : -1;
+                    const correctIndex = question.correctAnswerIndex;
+                    const isCorrect = userAnswerIndex === correctIndex;
+
+                    return (
+                        <div 
+                            key={index} 
+                            className={`p-4 rounded-xl border ${
+                                isCorrect 
+                                    ? 'bg-green-500/10 border-green-500/30' 
+                                    : 'bg-red-500/10 border-red-500/30'
+                            }`}
+                        >
+                            <div className="flex items-start gap-3 mb-3">
+                                {isCorrect ? (
+                                    <CheckCircleIcon className="h-6 w-6 text-green-400 flex-shrink-0 mt-1" />
+                                ) : (
+                                    <XCircleIcon className="h-6 w-6 text-red-400 flex-shrink-0 mt-1" />
+                                )}
+                                <p className="font-semibold text-white">
+                                    {index + 1}. {question.questionText}
+                                </p>
+                            </div>
+                            <p className="text-sm text-slate-400 mb-2">Your answer: 
+                                <span className={`font-medium ${isCorrect ? 'text-green-300' : 'text-red-300'}`}>
+                                    {userAnswerIndex > -1 ? ` ${question.options[userAnswerIndex]}` : ' Not answered'}
+                                </span>
+                            </p>
+                            {!isCorrect && (
+                                <p className="text-sm text-red-300">
+                                    Correct answer: {question.options[correctIndex]}
+                                </p>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+            
+            {/* Actions */}
+            <div className="flex justify-center gap-4">
+                 <button onClick={onHome} className="flex items-center gap-2 px-6 py-3 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors">
+                     <HomeIcon className="h-5 w-5" /> Back to Home
+                 </button>
+                 <button onClick={onRestart} className="flex items-center gap-2 px-6 py-3 rounded-lg bg-cyan-500/80 text-white hover:bg-cyan-500 transition-colors">
+                     <ArrowPathIcon className="h-5 w-5" /> Try Again
+                 </button>
+            </div>
+        </div>
+    );
 };
 
 export default QuizPage;

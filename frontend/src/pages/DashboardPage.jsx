@@ -32,23 +32,23 @@ const dashboardData = {
 };
 
 // --- Main Dashboard Component ---
-const DashboardPage = () => {
+const DashboardPage = ({ isSidebarOpen }) => { // Add isSidebarOpen prop
     return (
-        <div className="max-w-7xl mx-auto">
+        <div className={`max-w-7xl mx-auto transition-all duration-300 ${isSidebarOpen ? 'px-4' : 'px-6'}`}>
             <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
                 <h1 className="text-4xl md:text-5xl font-extrabold mb-2 bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
                     Welcome Back, {dashboardData.userName}!
                 </h1>
                 <p className="text-lg text-slate-300 font-light">Here's your learning snapshot.</p>
             </motion.div>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-2 space-y-8">
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            <div className={`grid grid-cols-1 ${isSidebarOpen ? 'lg:grid-cols-3' : 'xl:grid-cols-3'} gap-8 transition-all duration-300`}>
+                <div className={`${isSidebarOpen ? 'lg:col-span-2' : 'xl:col-span-2'} space-y-8`}>
+                    <div className={`grid ${isSidebarOpen ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-2 lg:grid-cols-4'} gap-6 transition-all duration-300`}>
                         {dashboardData.stats.map((stat, i) => ( <StatCard key={i} stat={stat} index={i} /> ))}
                     </div>
                     <PerformanceChart data={dashboardData.performance} />
                 </div>
-                <div className="lg:col-span-1">
+                <div className={`${isSidebarOpen ? 'lg:col-span-1' : 'xl:col-span-1'}`}>
                     <RecentActivityList activities={dashboardData.recentActivity} />
                 </div>
             </div>
