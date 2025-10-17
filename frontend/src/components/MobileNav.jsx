@@ -11,7 +11,7 @@ const MobileNav = ({ setSidebarOpen, isSidebarOpen, user }) => {
                 <Bars3Icon className="h-6 w-6 text-white" />
             </button>
             
-            <h1 className="text-xl font-bold bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent">
+            <h1 className=" absolute left-1/2 -translate-x-1/2 text-xl font-bold bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent">
                 Study Snap
             </h1>
             
