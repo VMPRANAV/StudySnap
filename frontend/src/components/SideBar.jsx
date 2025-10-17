@@ -1,5 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { 
     ChartPieIcon, 
     QueueListIcon, 
@@ -9,15 +10,18 @@ import {
     XMarkIcon
 } from '@heroicons/react/24/outline';
 
-const Sidebar = ({ currentPage, setCurrentPage, isSidebarOpen, setSidebarOpen, user, onLogout }) => {
+const Sidebar = ({ isSidebarOpen, setSidebarOpen, user, onLogout }) => {
+    const navigate = useNavigate();
+    const location = useLocation();
+
     const navItems = [
-        { id: 'dashboard', label: 'Dashboard', icon: ChartPieIcon },
-        { id: 'flashcards', label: 'Flashcards', icon: QueueListIcon },
-        { id: 'quiz', label: 'Interactive Quiz', icon: QuestionMarkCircleIcon },
+        { id: 'dashboard', label: 'Dashboard', icon: ChartPieIcon, path: '/dashboard' },
+        { id: 'flashcards', label: 'Flashcards', icon: QueueListIcon, path: '/flashcards' },
+        { id: 'quiz', label: 'Interactive Quiz', icon: QuestionMarkCircleIcon, path: '/quiz' },
     ];
 
-    const handleNavigation = (pageId) => {
-        setCurrentPage(pageId);
+    const handleNavigation = (path) => {
+        navigate(path);
         if (window.innerWidth < 768) {
             setSidebarOpen(false);
         }
@@ -68,7 +72,7 @@ const Sidebar = ({ currentPage, setCurrentPage, isSidebarOpen, setSidebarOpen, u
                             </div>
                             <div className="flex-1 min-w-0">
                                 <p className="text-white font-semibold truncate">
-                                    {user.username || 'User'}
+                                    {user.username || user.name || 'User'}
                                 </p>
                                 <p className="text-slate-400 text-sm truncate">
                                     {user.email}
@@ -82,12 +86,12 @@ const Sidebar = ({ currentPage, setCurrentPage, isSidebarOpen, setSidebarOpen, u
                 <nav className="flex-1 p-4 space-y-2">
                     {navItems.map((item) => {
                         const Icon = item.icon;
-                        const isActive = currentPage === item.id;
+                        const isActive = location.pathname === item.path;
                         
                         return (
                             <motion.button
                                 key={item.id}
-                                onClick={() => handleNavigation(item.id)}
+                                onClick={() => handleNavigation(item.path)}
                                 className={`
                                     w-full flex items-center gap-3 px-4 py-3 rounded-xl
                                     transition-all duration-200
