@@ -375,9 +375,9 @@ const backend=import.meta.env.VITE_URL||'http://localhost:3000'
                                         <h3 className="text-2xl font-bold text-cyan-300">Upload Document</h3>
                                     </div>
                                     
-                                    <motion.label 
+                                                           <motion.label 
                                         htmlFor="pdf-upload" 
-                                        className={`group relative w-full border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all duration-500 ${
+                                        className={`group relative w-full border-2 border-dashed rounded-2xl h-96 flex flex-col items-center justify-center cursor-pointer transition-all duration-500 ${
                                             pdfFile 
                                                 ? 'bg-gradient-to-br from-emerald-500/10 to-green-500/10 border-emerald-400/50 shadow-lg shadow-emerald-500/20' 
                                                 : 'bg-gradient-to-br from-white/5 to-white/10 border-white/20 hover:border-cyan-400/70 hover:shadow-lg hover:shadow-cyan-500/20'

@@ -65,6 +65,7 @@ const FlashcardPage = ({ isSidebarOpen }) => {
 
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+    const [isDragging, setIsDragging] = useState(false);
     const backend=import.meta.env.VITE_URL||'http://localhost:3000'
 
     const backendUrl = `${backend}/api/flashcards`;
@@ -163,23 +164,49 @@ const FlashcardPage = ({ isSidebarOpen }) => {
 
         fetchSets();
     }, [isAuthenticated]);
-
+const processFile = (file) => {
+    if (file && file.type === "application/pdf") {
+        setPdfFile(file);
+        setFileName(file.name);
+        setError(null);
+        setUploadProgress(0);
+        setCurrentStep('');
+    } else {
+        setPdfFile(null);
+        setFileName('');
+        setUploadProgress(0);
+        setCurrentStep('');
+        setError("Please select a valid PDF file.");
+    }
+};
     const handleFileChange = (e) => {
         const file = e.target.files[0];
-        if (file && file.type === "application/pdf") {
-            setPdfFile(file);
-            setFileName(file.name);
-            setError(null);
-            setUploadProgress(0);
-            setCurrentStep('');
-        } else {
-            setPdfFile(null);
-            setFileName('');
-            setUploadProgress(0);
-            setCurrentStep('');
-            setError("Please select a valid PDF file.");
-        }
-    };
+    if (file) {
+        processFile(file);
+    }
+        };
+        const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragging(false); 
+    
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+        processFile(files[0]);
+    }
+};
+const handleDragOver = (e) => {
+    e.preventDefault();
+};
+
+const handleDragEnter = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+};
+
+const handleDragLeave = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+};
 
     const handleGenerate = async () => {
         if (!prompt || !pdfFile) {
@@ -328,16 +355,22 @@ const FlashcardPage = ({ isSidebarOpen }) => {
                             <h3 className="text-2xl font-bold text-cyan-300">Upload Document</h3>
                         </div>
                         
-                        <motion.label 
-                            htmlFor="pdf-upload" 
-                            className={`group relative w-full border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all duration-500 ${
-                                pdfFile 
-                                    ? 'bg-gradient-to-br from-emerald-500/10 to-green-500/10 border-emerald-400/50 shadow-lg shadow-emerald-500/20' 
-                                    : 'bg-gradient-to-br from-white/5 to-white/10 border-white/20 hover:border-cyan-400/70 hover:shadow-lg hover:shadow-cyan-500/20'
-                            }`}
-                            whileHover={{ scale: 1.02 }}
-                            whileTap={{ scale: 0.98 }}
-                        >
+                       <motion.label 
+    htmlFor="pdf-upload" 
+    className={`group relative w-full border-2 border-dashed rounded-2xl h-96 flex flex-col items-center justify-center cursor-pointer transition-all duration-500 ${
+        pdfFile 
+            ? 'bg-gradient-to-br from-emerald-500/10 to-green-500/10 border-emerald-400/50 shadow-lg shadow-emerald-500/20' 
+            : isDragging
+            ? 'bg-cyan-500/20 border-cyan-400/70 shadow-lg shadow-cyan-500/30'
+            : 'bg-gradient-to-br from-white/5 to-white/10 border-white/20 hover:border-cyan-400/70 hover:shadow-lg hover:shadow-cyan-500/20'
+    }`}
+    whileHover={{ scale: 1.02 }}
+    whileTap={{ scale: 0.98 }}
+    onDragOver={handleDragOver}
+    onDragEnter={handleDragEnter}
+    onDragLeave={handleDragLeave}
+    onDrop={handleDrop}
+>
                             <div className="relative z-10">
                                 {pdfFile ? (
                                     <CheckCircleIcon className="h-16 w-16 mx-auto mb-4 text-emerald-400" />
@@ -497,7 +530,19 @@ const FlashcardPage = ({ isSidebarOpen }) => {
                                 <h3 className="text-2xl font-bold mb-8 bg-gradient-to-r from-cyan-300 to-purple-300 bg-clip-text text-transparent">
                                     Saved Collections
                                 </h3>
-                                <SavedSetsList sets={savedSets} onLoad={loadSet} />
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {savedSets.map(set => (
+            <motion.div
+              key={set._id}
+              className="bg-gray-800 p-4 rounded-lg cursor-pointer hover:bg-gray-700 transition-colors"
+              onClick={() => loadSet(set)}
+              whileHover={{ y: -5 }}
+            >
+              <h3 className="font-bold text-lg text-white">{set.title || 'Untitled Set'}</h3>
+              <p className="text-sm text-gray-400">{set.flashcards.length} cards</p>
+            </motion.div>
+          ))}
+        </div>
                             </motion.div>
                         )}
                     </AnimatePresence>
@@ -537,7 +582,7 @@ const SavedSetsList = ({ sets, onLoad }) => {
                         </div>
                         <div className="overflow-hidden">
                             <p className="font-semibold text-lg truncate text-white group-hover:text-cyan-200 transition-colors">
-                                {set.topic}
+                                {set.title}
                             </p>
                             <p className="text-sm text-slate-400 mt-1">
                                 {new Date(set.createdAt).toLocaleDateString()} • {set.flashcards?.length || 0} cards
