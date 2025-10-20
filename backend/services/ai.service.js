@@ -195,6 +195,89 @@ Response format example (respond with ONLY the JSON array):
       throw new Error(`Quiz generation failed: ${error.message}`);
     }
   }
+    static async generateQaSet(documentText, userQuery, marksDistribution) {
+    try {
+      const maxContextLength = 7000;
+      const truncatedText = documentText.length > maxContextLength 
+        ? documentText.substring(0, maxContextLength) + '...[truncated]'
+        : documentText;
+
+      // Convert marksDistribution object to a readable string for the prompt
+      const marksRequest = Object.entries(marksDistribution)
+        .map(([marks, count]) => `- ${count} question(s) worth ${marks} marks each`)
+        .join("\n");
+
+      const prompt = `Based on the following document text, fulfill the user's request for the topic: "${userQuery}".
+
+Document Text:
+${truncatedText}
+
+USER REQUEST:
+Generate a set of questions and detailed answers based on the text. The answer should be comprehensive enough to justify the allocated marks.
+
+GENERATE EXACTLY:
+${marksRequest}
+
+IMPORTANT INSTRUCTIONS:
+1.  Create questions and answers directly from the provided document text.
+2.  The length and detail of the answer MUST correspond to the marks allocated. A 14-mark answer should be significantly more detailed than a 2-mark answer.
+3.  Return ONLY a valid JSON array of objects. Do not include any other text, markdown, or explanations.
+4.  Each object in the array must have three keys: "question" (string), "answer" (string), and "marks" (number).
+
+Response format example (respond with ONLY the JSON array):
+[
+  {
+    "question": "What is the core concept of X?",
+    "answer": "The core concept of X is...",
+    "marks": 2
+  },
+  {
+    "question": "Explain the process of Y in detail.",
+    "answer": "The process of Y involves several key stages. Firstly...",
+    "marks": 14
+  }
+]`;
+
+      console.log('Sending Q&A generation request to Groq...');
+
+      const chatCompletion = await groq.chat.completions.create({
+        messages: [{ role: "user", content: prompt }],
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.7,
+        max_completion_tokens: 4096, // Increased for potentially long answers
+        top_p: 1,
+        stream: false,
+        stop: null
+      });
+
+      console.log('Received Q&A response from Groq');
+      const result = chatCompletion?.choices?.[0]?.message?.content || '';
+      
+      if (!result) {
+        throw new Error('Empty response from AI service');
+      }
+
+      const parsedQaSet = this.cleanAndParseJSON(result);
+
+      // Basic validation
+      if (!Array.isArray(parsedQaSet)) {
+          throw new Error('AI returned a non-array format for Q&A set.');
+      }
+      if (parsedQaSet.some(item => !item.question || !item.answer || !item.marks)) {
+          throw new Error('One or more Q&A items are missing required fields.');
+      }
+
+      console.log(`Successfully generated and validated Q&A set with ${parsedQaSet.length} questions.`);
+      return parsedQaSet;
+
+    } catch (error) {
+      console.error('Error in generateQaSet:', {
+        message: error.message,
+        stack: error.stack,
+      });
+      throw new Error(`Q&A set generation failed: ${error.message}`);
+    }
+  }
 }
 
 module.exports = AiService;

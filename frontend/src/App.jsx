@@ -6,7 +6,7 @@ import DashboardPage from './pages/DashboardPage';
 import FlashcardPage from './pages/FlashcardPage';
 import QuizPage from './pages/QuizPage';
 import LandingPage from './pages/LandingPage';
-
+import QAPage from './pages/QAPage'
 // Protected Route Wrapper Component
 const ProtectedRoute = ({ children, isAuthenticated }) => {
     if (!isAuthenticated) {
@@ -172,7 +172,21 @@ const App = () => {
                         </ProtectedRoute>
                     } 
                 />
-
+                <Route
+                path ="/qa"
+                element={
+<ProtectedRoute isAuthenticated={isAuthenticated}>
+      <MainLayout 
+                                isSidebarOpen={isSidebarOpen}
+                                setSidebarOpen={setSidebarOpen}
+                                user={user}
+                                onLogout={handleLogout}
+                            >
+                                <QAPage isSidebarOpen={isSidebarOpen} user={user} />
+                            </MainLayout>
+                        </ProtectedRoute>
+                }
+/>
                 {/* Catch all - redirect to dashboard if authenticated, otherwise to landing */}
                 <Route 
                     path="*" 

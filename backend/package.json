@@ -21,6 +21,7 @@
     "langchain": "^0.3.35",
     "mongoose": "^8.19.1",
     "multer": "^2.0.2",
-    "pdf-parse": "^1.1.1"
+    "pdf-parse": "^1.1.1",
+    "pdfkit": "^0.17.2"
   }
 }

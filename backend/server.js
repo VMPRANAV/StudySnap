@@ -6,6 +6,7 @@ const flashcardRoutes = require('./routes/flashcard.routes');
 const quizRoutes = require('./routes/quiz.routes');
 const authRoutes=require('./routes/auth.routes');
 const dashboardRoutes= require('./routes/dashboard.routes')
+const qaRoutes= require('./routes/qa.routes')
 const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -28,6 +29,7 @@ app.use('/api/flashcards', flashcardRoutes);
 app.use('/api/quizzes', quizRoutes);
 app.use('/api/auth',authRoutes);
 app.use('/api/dashboard',dashboardRoutes);
+app.use('/api/qa',qaRoutes);
 app.get('/', (req, res) => {
   res.status(200).send('Personalized AI Educator Backend is running successfully!');
 });
