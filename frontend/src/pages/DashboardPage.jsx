@@ -5,7 +5,8 @@ import {
     ChartBarIcon,
     CheckCircleIcon,
     ClockIcon,
-    PlusCircleIcon
+    PlusCircleIcon,
+    QuestionMarkCircleIcon
 } from '@heroicons/react/24/solid';
 import { formatDistanceToNow } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
@@ -119,6 +120,9 @@ const DashboardPage = ({ isSidebarOpen }) => {
                 <div className="flex flex-wrap justify-center gap-4">
                     <button className="px-5 py-3 rounded-xl bg-white/10 text-white font-semibold hover:bg-white/20 transition-colors flex items-center gap-2" onClick={() => navigate('/flashcards')}>
                         <BookOpenIcon className="h-5 w-5" /><span> Create FlashCard</span>
+                    </button>
+                    <button className="px-5 py-3 rounded-xl bg-white/10 text-white font-semibold hover:bg-white/20 transition-colors flex items-center gap-2" onClick={() => navigate('/qa')}>
+                        <QuestionMarkCircleIcon className="h-5 w-5" /><span> Generate Q&A</span>
                     </button>
                     <button className="px-5 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-500 text-white font-bold hover:opacity-90 transition-opacity flex items-center gap-2" onClick={() => navigate('/quiz')}>
                         <PlusCircleIcon className="h-6 w-6" /><span>Create New Quiz</span>

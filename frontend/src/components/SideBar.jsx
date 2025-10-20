@@ -7,6 +7,7 @@ import {
     QuestionMarkCircleIcon,
     ArrowRightOnRectangleIcon,
     UserCircleIcon,
+    PuzzlePieceIcon,
     XMarkIcon
 } from '@heroicons/react/24/outline';
 
@@ -17,7 +18,8 @@ const Sidebar = ({ isSidebarOpen, setSidebarOpen, user, onLogout }) => {
     const navItems = [
         { id: 'dashboard', label: 'Dashboard', icon: ChartPieIcon, path: '/dashboard' },
         { id: 'flashcards', label: 'Flashcards', icon: QueueListIcon, path: '/flashcards' },
-        { id: 'quiz', label: 'Interactive Quiz', icon: QuestionMarkCircleIcon, path: '/quiz' },
+        { id: 'quiz', label: 'Interactive Quiz', icon:PuzzlePieceIcon,path: '/quiz' },
+        {id :'qa',label:'Question Answers',icon:QuestionMarkCircleIcon ,path:'/qa'}
     ];
 
     const handleNavigation = (path) => {
