@@ -489,6 +489,7 @@ const handleDragLeave = (e) => {
                 </motion.div>
 
                 {/* Right Panel - Viewer/Saved Sets */}
+               {/* Right Panel - Viewer/Saved Sets */}
                 <motion.div 
                     initial={{ opacity: 0, x: 50 }}
                     animate={{ opacity: 1, x: 0 }}
@@ -530,19 +531,7 @@ const handleDragLeave = (e) => {
                                 <h3 className="text-2xl font-bold mb-8 bg-gradient-to-r from-cyan-300 to-purple-300 bg-clip-text text-transparent">
                                     Saved Collections
                                 </h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {savedSets.map(set => (
-            <motion.div
-              key={set._id}
-              className="bg-gray-800 p-4 rounded-lg cursor-pointer hover:bg-gray-700 transition-colors"
-              onClick={() => loadSet(set)}
-              whileHover={{ y: -5 }}
-            >
-              <h3 className="font-bold text-lg text-white">{set.title || 'Untitled Set'}</h3>
-              <p className="text-sm text-gray-400">{set.flashcards.length} cards</p>
-            </motion.div>
-          ))}
-        </div>
+                                <SavedSetsList sets={savedSets} onLoad={loadSet} />
                             </motion.div>
                         )}
                     </AnimatePresence>
