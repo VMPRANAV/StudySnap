@@ -56,7 +56,7 @@ const Sidebar = ({ isSidebarOpen, setSidebarOpen, user, onLogout }) => {
                     damping: 30
                 }}
                 className={`
-                    fixed top-0 left-0 h-screen w-72 z-50
+                    fixed top-0 left-0 h-screen w-72 z-40
                     bg-slate-900/95 backdrop-blur-xl 
                     border-r border-white/10 
                     flex flex-col
