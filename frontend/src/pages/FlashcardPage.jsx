@@ -571,7 +571,7 @@ const SavedSetsList = ({ sets, onLoad }) => {
                         </div>
                         <div className="overflow-hidden">
                             <p className="font-semibold text-lg truncate text-white group-hover:text-cyan-200 transition-colors">
-                                {set.title}
+                                {set.topic}
                             </p>
                             <p className="text-sm text-slate-400 mt-1">
                                 {new Date(set.createdAt).toLocaleDateString()} • {set.flashcards?.length || 0} cards
