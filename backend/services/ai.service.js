@@ -84,32 +84,48 @@ class AiService {
    * Generates flashcards using Groq API
    */
   static async generateFlashcards(documentText, userQuery) {
-    const prompt = `Based on the following document text, fulfill the user's request.
-    Document Text: ${documentText}
-    User Request: ${userQuery}
-    
-    Return ONLY a valid JSON array. No markdown, no code blocks, no explanations.
-    Format: [{"question": "What is X?", "answer": "X is Y."}]
-    
-    Do NOT wrap your response in \`\`\`json or any other formatting.`;
+    try {
+      // ✅ Limit document text to prevent token overflow
+      const maxContextLength = 6000;
+      const truncatedText = documentText.length > maxContextLength 
+        ? documentText.substring(0, maxContextLength) + '...[truncated]'
+        : documentText;
 
-    const chatCompletion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-      model: "llama-3.3-70b-versatile",
-  temperature: 0.8,
-  max_completion_tokens: 25361,
-  top_p: 1,
-  stream: false,
-  stop: null
-    });
-console.log('chatCompletion:', JSON.stringify(chatCompletion, null, 2));
-    const result = chatCompletion?.choices?.[0]?.message?.content || '';
-    return this.cleanAndParseJSON(result);
+      const prompt = `Based on the following document text, fulfill the user's request.
+Document Text:
+${truncatedText}
+User Request: ${userQuery}
+
+Return ONLY a valid JSON array. No markdown, no code blocks, no explanations.
+Format: [{"question": "What is X?", "answer": "X is Y."}]
+
+Do NOT wrap your response in \`\`\`json or any other formatting.`;
+
+      const chatCompletion = await groq.chat.completions.create({
+        messages: [
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+        model: "llama-3.3-70b-versatile",
+        temperature: 0.8,
+        max_completion_tokens: 4096,
+        top_p: 1,
+        stream: false,
+        stop: null
+      });
+      console.log('chatCompletion:', JSON.stringify(chatCompletion, null, 2));
+      const result = chatCompletion?.choices?.[0]?.message?.content || '';
+      return this.cleanAndParseJSON(result);
+    } catch (error) {
+      console.error('Error in generateFlashcards:', {
+        message: error.message,
+        stack: error.stack,
+        type: error.constructor.name
+      });
+      throw new Error(`Flashcard generation failed: ${error.message}`);
+    }
   }
 
   /**
