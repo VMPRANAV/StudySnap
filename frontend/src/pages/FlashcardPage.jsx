@@ -264,10 +264,33 @@ const handleDragLeave = (e) => {
                 return;
             }
             
-            if (!genRes.ok) {
-                throw new Error(`Generation failed: ${genRes.status}`);
+            // --- Handle 413 or token limit error here ---
+            if (genRes.status === 413) {
+                setError("The uploaded file is too large or contains too much text for the AI to process. Please try a smaller document or split your PDF.");
+                return;
             }
-            
+
+            if (!genRes.ok) {
+                let errMsg = `Generation failed: ${genRes.status}`;
+                try {
+                    const errData = await genRes.json();
+                    // If status is 413 or backend error message contains 413, show "too large" message
+                    if (
+                        genRes.status === 413 ||
+                        (genRes.status === 500 && errData?.error && typeof errData.error === 'string' && errData.error.includes('413'))
+                    ) {
+                        errMsg = "The uploaded file is too large for the AI model. Please try a smaller document or split your PDF.";
+                    } else if (errData?.error?.message && errData.error.message.includes("Request too large for model")) {
+                        errMsg = "The uploaded file is too large for the AI model. Please try a smaller document or split your PDF.";
+                    } else if (errData?.message) {
+                        errMsg = errData.message;
+                    }
+                } catch {}
+                setError(errMsg);
+                return;
+            }
+            // --- End error handling ---
+
             const newSet = await genRes.json();
             
             setCurrentStep('Flashcards generated successfully!');

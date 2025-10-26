@@ -101,8 +101,8 @@ class AiService {
         }
       ],
       model: "llama-3.3-70b-versatile",
-  temperature: 1,
-  max_completion_tokens: 1024,
+  temperature: 0.8,
+  max_completion_tokens: 25361,
   top_p: 1,
   stream: false,
   stop: null
@@ -150,8 +150,8 @@ Response format example (respond with ONLY the JSON array):
       const chatCompletion = await groq.chat.completions.create({
         messages: [{ role: "user", content: prompt }],
          model: "llama-3.3-70b-versatile",
-  temperature: 1,
-  max_completion_tokens: 1024,
+  temperature: 0.8,
+  max_completion_tokens: 4096,
   top_p: 1,
   stream: false,
   stop: null
