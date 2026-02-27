@@ -1,0 +1,24 @@
+{
+  "short_name": "Study Snap",
+  "name": "Study Snap - AI Powered Learning",
+  "description": "An application to generate flashcards and quizzes from documents to supercharge your study sessions.",
+  "icons": [
+    {
+      "src": "https://placehold.co/192x192/1e293b/ffffff?text=SS",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://placehold.co/512x512/1e293b/ffffff?text=SS",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#0f172a",
+  "background_color": "#0f172a",
+  "scope": "/"
+}
