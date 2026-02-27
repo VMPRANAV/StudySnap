@@ -1,8 +1,8 @@
 const AiService = require('../services/ai.service');
 const FlashcardSet = require('../models/flashcardSet.model');
-
+const Chunk = require('../models/chunk.model');
 // Using a simple in-memory cache for extracted text
-const textCache = new Map();
+
 
 exports.processPdfForFlashcards = async (req, res) => {
   try {
@@ -10,12 +10,17 @@ exports.processPdfForFlashcards = async (req, res) => {
       return res.status(400).json({ message: 'No file uploaded.' });
     }
 
-    // Extract text from PDF instead of creating vector store
-    const documentText = await AiService.extractTextFromPdf(req.file.path);
-    const fileId = req.file.originalname; // Use filename as a simple ID
-    textCache.set(fileId, documentText);
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ message: 'User authentication required.' });
+    }
 
-    res.status(200).json({ fileId });
+    // Extract text from PDF instead of creating vector store
+    const userId = req.user.id;
+    const fileId = req.file.originalname; // Use filename as a simple ID
+   await Chunk.deleteMany({ fileId, userId });
+   const chunkCount = await AiService.extractAndStorePdf(req.file.path, userId, fileId);
+
+    res.status(200).json({ fileId, chunkCount, message: "PDF indexed successfully" });
   } catch (error) {
     console.error('Error processing PDF for flashcards:', error);
     res.status(500).json({ message: 'Failed to process PDF.' });
@@ -26,37 +31,8 @@ exports.generateFlashcards = async (req, res) => {
   try {
     const { fileId, prompt } = req.body;
 
-    // Validate required fields
-    if (!fileId) {
-      return res.status(400).json({ message: 'fileId is required.' });
-    }
+    const flashcards = await AiService.generateFlashcards(fileId, prompt);
 
-    if (!prompt) {
-      return res.status(400).json({ message: 'prompt is required.' });
-    }
-
-    // Validate user is authenticated
-    if (!req.user || !req.user.id) {
-      return res.status(401).json({ message: 'User authentication required.' });
-    }
-
-    const documentText = textCache.get(fileId);
-
-    if (!documentText) {
-      return res.status(404).json({ 
-        message: 'File not processed or expired. Please upload the PDF again.' 
-      });
-    }
-
-    // Pass documentText and prompt as expected by the service
-    const flashcards = await AiService.generateFlashcards(documentText, prompt);
-
-    // Validate flashcards data
-    if (!flashcards || !Array.isArray(flashcards) || flashcards.length === 0) {
-      throw new Error('AI service returned invalid or empty flashcards data');
-    }
-
-    // Create flashcard set with authenticated user's ID
     const newSet = new FlashcardSet({ 
       userId: req.user.id,
       sourceFileId: fileId,
@@ -65,14 +41,10 @@ exports.generateFlashcards = async (req, res) => {
     });
 
     await newSet.save();
-
     res.status(201).json(newSet);
   } catch (error) {
     console.error('Error generating flashcards:', error);
-    res.status(500).json({ 
-      message: 'Failed to generate flashcards.',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    res.status(500).json({ message: 'Failed to generate flashcards.', error: error.message });
   }
 };
 

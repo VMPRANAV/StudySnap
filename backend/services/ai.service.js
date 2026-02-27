@@ -1,300 +1,209 @@
 // --- Step 1: Import Core Dependencies ---
 const { Groq } = require('groq-sdk');
 const { PDFLoader } = require("@langchain/community/document_loaders/fs/pdf");
-
+const { RecursiveCharacterTextSplitter } = require("@langchain/textsplitters");
+const { GoogleGenerativeAIEmbeddings } = require("@langchain/google-genai");
+const { TaskType } = require("@google/generative-ai");
+const Chunk= require('../models/chunk.model');
 // --- Step 2: Initialize the Groq client ---
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
+const embeddings = new GoogleGenerativeAIEmbeddings({
+  apiKey: process.env.GEMINI_API_KEY,
+  model: "gemini-embedding-001", // Or "text-embedding-004"
+  taskType: TaskType.RETRIEVAL_DOCUMENT,
+  dimensions: 768, // Add this line to fix the mismatch
+});
 
-// The simplified AiService class
+
 class AiService {
-  /**
-   * Extracts all text content from a PDF file.
-   */
-  static async extractTextFromPdf(pdfPath) {
+  
+  static async extractAndStorePdf(pdfPath,userId,fileId) {
     const loader = new PDFLoader(pdfPath);
     const docs = await loader.load();
-    return docs.map((doc) => doc.pageContent).join("\n\n");
-  }
+   const fullText= docs.map((doc) => doc.pageContent).join("\n\n");
+  const splitter = new RecursiveCharacterTextSplitter({
+    chunkSize:1000,
+    chunkOverlap:200,
+  });
+  const splitDocs = await splitter.createDocuments([fullText]);
+  const chunkDocs=[];
+  for(const doc of splitDocs){
+    const vector =await this.generateEmbedding(doc.pageContent);
+    chunkDocs.push({
+      fileId:fileId,
+      userId: userId,
+      text:doc.pageContent,
+      embedding:vector
 
-  /**
+    });
+
+    
+  }
+      await Chunk.insertMany(chunkDocs);
+  return chunkDocs.length;
+  }
+// Generate Embeddings
+static async generateEmbedding(text){
+  try{
+
+
+    return await embeddings.embedQuery(text);;
+  }
+  catch(error){
+    console.error("Gemini Embedding Error:",error);
+    throw new Error("Failed to generate embedding vector");
+  }
+}
+static async retrieveContext(fileId,query){
+  const queryVector= await this.generateEmbedding(query);
+  const relevantChunks= await Chunk.aggregate([{
+    "$vectorSearch": {
+      "index": "vector_index",
+      "path": "embedding",
+      "queryVector": queryVector,
+      "numCandidates": 100,
+      "limit": 5,
+      "filter": { "fileId": fileId }
+    }
+  }]);
+  return relevantChunks.map(c=>c.text).join("\n\n");
+}
+/**
    * Helper method to clean the AI's string response and safely parse it as JSON.
    */
   static cleanAndParseJSON(aiResponse) {
-    console.log("Raw AI response length:", aiResponse.length);
-    console.log("Raw AI response preview:", aiResponse.substring(0, 500));
-    
     let cleanedString = aiResponse.trim();
-
-    // Remove markdown code blocks
-    cleanedString = cleanedString.replace(/^```json\s*\n?/i, '');
-    cleanedString = cleanedString.replace(/\n?\s*```$/i, '');
-    cleanedString = cleanedString.replace(/^```\s*\n?/i, '');
-    cleanedString = cleanedString.replace(/\n?\s*```$/i, '');
+    cleanedString = cleanedString.replace(/^```json\s*\n?/i, '').replace(/\n?\s*```$/i, '');
+    cleanedString = cleanedString.replace(/^```\s*\n?/i, '').replace(/\n?\s*```$/i, '');
     cleanedString = cleanedString.replace(/^`+|`+$/g, '');
     
-    // Remove any text before the first [ or {
     const jsonStart = cleanedString.search(/[\[{]/);
-    if (jsonStart > 0) {
-      console.log('Removing leading text before JSON');
-      cleanedString = cleanedString.substring(jsonStart);
-    }
+    if (jsonStart > 0) cleanedString = cleanedString.substring(jsonStart);
     
-    // Remove any text after the last ] or }
     const jsonEnd = cleanedString.lastIndexOf(']') !== -1 
       ? cleanedString.lastIndexOf(']') + 1 
       : cleanedString.lastIndexOf('}') + 1;
-    if (jsonEnd > 0 && jsonEnd < cleanedString.length) {
-      console.log('Removing trailing text after JSON');
-      cleanedString = cleanedString.substring(0, jsonEnd);
-    }
+    if (jsonEnd > 0 && jsonEnd < cleanedString.length) cleanedString = cleanedString.substring(0, jsonEnd);
     
-    cleanedString = cleanedString.trim();
-    
-    console.log("Cleaned string length:", cleanedString.length);
-    console.log("Cleaned string preview:", cleanedString.substring(0, 500));
-
     try {
-      const parsed = JSON.parse(cleanedString);
-      console.log("Successfully parsed JSON with", Array.isArray(parsed) ? parsed.length : 'N/A', 'items');
-      return parsed;
+      return JSON.parse(cleanedString);
     } catch (error) {
-      console.error("JSON Parse error:", error.message);
-      console.error("Failed string (first 1000 chars):", cleanedString.substring(0, 1000));
-      
-      // Try to extract JSON array as last resort
-      try {
-        const match = cleanedString.match(/\[[\s\S]*\]/);
-        if (match) {
-          console.log("Attempting fallback: extract JSON array from string");
-          const fallbackParsed = JSON.parse(match[0]);
-          console.log("Fallback parse succeeded");
-          return fallbackParsed;
-        }
-      } catch (retryError) {
-        console.error("Fallback parse also failed:", retryError.message);
-      }
-      
-      throw new Error(`AI returned invalid JSON format: ${error.message}`);
+      const match = cleanedString.match(/\[[\s\S]*\]/);
+      if (match) return JSON.parse(match[0]);
+      throw new Error(`AI returned invalid JSON: ${error.message}`);
     }
   }
 
   /**
-   * Generates flashcards using Groq API
+   * 5. Updated Flashcard Generation (Using RAG)
    */
-  static async generateFlashcards(documentText, userQuery) {
+  static async generateFlashcards(fileId, userQuery) {
     try {
-      // ✅ Limit document text to prevent token overflow
-      const maxContextLength = 6000;
-      const truncatedText = documentText.length > maxContextLength 
-        ? documentText.substring(0, maxContextLength) + '...[truncated]'
-        : documentText;
+      const context = await this.retrieveContext(fileId, userQuery);
 
-      const prompt = `Based on the following document text, fulfill the user's request.
-Document Text:
-${truncatedText}
+      const prompt = `Based on the following document context, generate flashcards.
+Context:
+${context}
+
 User Request: ${userQuery}
-
-Return ONLY a valid JSON array. No markdown, no code blocks, no explanations.
-Format: [{"question": "What is X?", "answer": "X is Y."}]
-
-Do NOT wrap your response in \`\`\`json or any other formatting.`;
+Return ONLY a valid JSON array: [{"question": "...", "answer": "..."}]`;
 
       const chatCompletion = await groq.chat.completions.create({
-        messages: [
-          {
-            role: "user",
-            content: prompt
-          }
-        ],
+        messages: [{ role: "user", content: prompt }],
         model: "llama-3.3-70b-versatile",
         temperature: 0.8,
-        max_completion_tokens: 4096,
-        top_p: 1,
-        stream: false,
-        stop: null
       });
-      console.log('chatCompletion:', JSON.stringify(chatCompletion, null, 2));
-      const result = chatCompletion?.choices?.[0]?.message?.content || '';
-      return this.cleanAndParseJSON(result);
+
+      return this.cleanAndParseJSON(chatCompletion.choices[0].message.content);
     } catch (error) {
-      console.error('Error in generateFlashcards:', {
-        message: error.message,
-        stack: error.stack,
-        type: error.constructor.name
-      });
       throw new Error(`Flashcard generation failed: ${error.message}`);
     }
   }
 
   /**
-   * Generates a quiz using Groq API
+   * 6. Updated Quiz Generation (Using RAG)
    */
-  static async generateQuiz(documentText, userQuery) {
+  static async generateQuiz(fileId, userQuery) {
     try {
-      // ✅ Limit document text to prevent token overflow
-      const maxContextLength = 6000;
-      const truncatedText = documentText.length > maxContextLength 
-        ? documentText.substring(0, maxContextLength) + '...[truncated]'
-        : documentText;
+      const context = await this.retrieveContext(fileId, userQuery);
 
-      const prompt = `Based on the following document text, fulfill the user's request.
-
-Document Text:
-${truncatedText}
+      const prompt = `Based on the following document context, generate an MCQ quiz.
+Context:
+${context}
 
 User Request: ${userQuery}
-
-IMPORTANT INSTRUCTIONS:
-1. Generate quiz questions based on the document content
-2. Return ONLY a valid JSON array - no markdown, no code blocks, no explanations
-3. Each object must have: "questionText", "options" (array of 4 strings), and "correctAnswerIndex" (0-3)
-4. Ensure all questions are relevant to the document content
-
-Response format example (respond with ONLY the JSON array):
-[
-  {
-    "questionText": "What is the main topic discussed?",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
-    "correctAnswerIndex": 0
-  }
-]`;
-
-      console.log('Sending request to Groq with text length:', truncatedText.length);
-
-      const chatCompletion = await groq.chat.completions.create({
-        messages: [{ role: "user", content: prompt }],
-         model: "llama-3.3-70b-versatile",
-  temperature: 0.8,
-  max_completion_tokens: 4096,
-  top_p: 1,
-  stream: false,
-  stop: null
-      });
-
-      console.log('Received response from Groq');
-
-      const result = chatCompletion?.choices?.[0]?.message?.content || '';
-      
-      if (!result) {
-        throw new Error('Empty response from AI service');
-      }
-
-      console.log('Raw AI response preview:', result.substring(0, 200));
-
-      const parsedQuiz = this.cleanAndParseJSON(result);
-
-      // ✅ Validate the parsed quiz structure
-      if (!Array.isArray(parsedQuiz) || parsedQuiz.length === 0) {
-        throw new Error('AI returned invalid quiz format: not an array or empty');
-      }
-
-      // ✅ Validate each question
-      for (let i = 0; i < parsedQuiz.length; i++) {
-        const q = parsedQuiz[i];
-        if (!q.questionText || !Array.isArray(q.options) || q.options.length !== 4 || 
-            typeof q.correctAnswerIndex !== 'number' || q.correctAnswerIndex < 0 || q.correctAnswerIndex > 3) {
-          throw new Error(`Invalid question structure at index ${i}: ${JSON.stringify(q)}`);
-        }
-      }
-
-      console.log('Successfully generated and validated quiz with', parsedQuiz.length, 'questions');
-      return parsedQuiz;
-
-    } catch (error) {
-      console.error('Error in generateQuiz:', {
-        message: error.message,
-        stack: error.stack,
-        type: error.constructor.name
-      });
-      throw new Error(`Quiz generation failed: ${error.message}`);
-    }
-  }
-    static async generateQaSet(documentText, userQuery, marksDistribution) {
-    try {
-      const maxContextLength = 7000;
-      const truncatedText = documentText.length > maxContextLength 
-        ? documentText.substring(0, maxContextLength) + '...[truncated]'
-        : documentText;
-
-      // Convert marksDistribution object to a readable string for the prompt
-      const marksRequest = Object.entries(marksDistribution)
-        .map(([marks, count]) => `- ${count} question(s) worth ${marks} marks each`)
-        .join("\n");
-
-      const prompt = `Based on the following document text, fulfill the user's request for the topic: "${userQuery}".
-
-Document Text:
-${truncatedText}
-
-USER REQUEST:
-Generate a set of questions and detailed answers based on the text. The answer should be comprehensive enough to justify the allocated marks.
-
-GENERATE EXACTLY:
-${marksRequest}
-
-IMPORTANT INSTRUCTIONS:
-1.  Create questions and answers directly from the provided document text.
-2.  The length and detail of the answer MUST correspond to the marks allocated. A 14-mark answer should be significantly more detailed than a 2-mark answer.
-3.  Return ONLY a valid JSON array of objects. Do not include any other text, markdown, or explanations.
-4.  Each object in the array must have three keys: "question" (string), "answer" (string), and "marks" (number).
-
-Response format example (respond with ONLY the JSON array):
-[
-  {
-    "question": "What is the core concept of X?",
-    "answer": "The core concept of X is...",
-    "marks": 2
-  },
-  {
-    "question": "Explain the process of Y in detail.",
-    "answer": "The process of Y involves several key stages. Firstly...",
-    "marks": 14
-  }
-]`;
-
-      console.log('Sending Q&A generation request to Groq...');
+Return ONLY a valid JSON array of objects with "questionText", "options" (4 strings), and "correctAnswerIndex" (0-3).`;
 
       const chatCompletion = await groq.chat.completions.create({
         messages: [{ role: "user", content: prompt }],
         model: "llama-3.3-70b-versatile",
-        temperature: 0.7,
-        max_completion_tokens: 4096, // Increased for potentially long answers
-        top_p: 1,
-        stream: false,
-        stop: null
+        temperature: 0.8,
       });
 
-      console.log('Received Q&A response from Groq');
-      const result = chatCompletion?.choices?.[0]?.message?.content || '';
-      
-      if (!result) {
-        throw new Error('Empty response from AI service');
+      const parsedQuiz = this.cleanAndParseJSON(chatCompletion.choices[0].message.content);
+
+      // Validation logic
+      for (const q of parsedQuiz) {
+        if (!q.questionText || q.options.length !== 4) throw new Error("Invalid quiz structure");
       }
 
-      const parsedQaSet = this.cleanAndParseJSON(result);
-
-      // Basic validation
-      if (!Array.isArray(parsedQaSet)) {
-          throw new Error('AI returned a non-array format for Q&A set.');
-      }
-      if (parsedQaSet.some(item => !item.question || !item.answer || !item.marks)) {
-          throw new Error('One or more Q&A items are missing required fields.');
-      }
-
-      console.log(`Successfully generated and validated Q&A set with ${parsedQaSet.length} questions.`);
-      return parsedQaSet;
-
+      return parsedQuiz;
     } catch (error) {
-      console.error('Error in generateQaSet:', {
-        message: error.message,
-        stack: error.stack,
-      });
-      throw new Error(`Q&A set generation failed: ${error.message}`);
+      throw new Error(`Quiz generation failed: ${error.message}`);
     }
   }
+
+static async generateQaSet(fileId, userQuery, marksDistribution) {
+  try {
+    // 1. Vector Search with a higher limit for detailed answers
+    const queryVector = await this.generateEmbedding(userQuery);
+    const relevantChunks = await Chunk.aggregate([
+      {
+        "$vectorSearch": {
+          "index": "vector_index",
+          "path": "embedding",
+          "queryVector": queryVector,
+          "numCandidates": 150,
+          "limit": 8, // More context for longer answers
+          "filter": { "fileId": fileId }
+        }
+      }
+    ]);
+
+    const contextText = relevantChunks.map(c => c.text).join("\n\n");
+
+    const marksRequest = Object.entries(marksDistribution)
+      .map(([marks, count]) => `- ${count} question(s) worth ${marks} marks each`)
+      .join("\n");
+
+    const prompt = `
+      Context from Study Document:
+      ${contextText}
+
+      Task: Generate questions for the topic "${userQuery}".
+      
+      Requirements:
+      ${marksRequest}
+
+      Instructions:
+      - Detail must match the marks (e.g., 14-mark answers must be comprehensive).
+      - Return ONLY a JSON array: [{"question": "...", "answer": "...", "marks": number}]
+    `;
+
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [{ role: "user", content: prompt }],
+      model: "llama-3.3-70b-versatile",
+      temperature: 0.7,
+      max_completion_tokens: 4096, // High limit for long answers
+    });
+
+    return this.cleanAndParseJSON(chatCompletion.choices[0].message.content);
+  } catch (error) {
+    throw new Error(`Q&A generation failed: ${error.message}`);
+  }
+}
 }
 
 module.exports = AiService;
-

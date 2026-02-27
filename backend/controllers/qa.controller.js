@@ -1,21 +1,22 @@
 const AiService = require('../services/ai.service');
 const QaSet = require('../models/qaSet.model');
 const PDFDocument = require('pdfkit');
-
+const Chunk = require('../models/chunk.model');
 // Using a simple in-memory cache for extracted text, same as other controllers
-const textCache = new Map();
+
 
 exports.processPdfForQa = async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ message: 'No file uploaded.' });
     }
+const userId = req.user.id;
+    const fileId = req.file.originalname;
+   await Chunk.deleteMany({ fileId, userId });
 
-    const documentText = await AiService.extractTextFromPdf(req.file.path);
-    const fileId = req.file.originalname; // Use filename as a simple ID
-    textCache.set(fileId, documentText);
-
-    res.status(200).json({ fileId });
+const chunkCount = await AiService.extractAndStorePdf(req.file.path, userId, fileId);
+res.status(200).json({ fileId, chunkCount, message: "Ready for Q&A generation" });
+ 
   } catch (error) {
     console.error('Error processing PDF for Q&A:', error);
     res.status(500).json({ message: 'Failed to process PDF.' });
@@ -39,13 +40,9 @@ exports.generateQaSet = async (req, res) => {
       return res.status(401).json({ message: 'User authentication required.' });
     }
 
-    const documentText = textCache.get(fileId);
-    if (!documentText) {
-      return res.status(404).json({ message: 'File not processed or expired. Please upload the PDF again.' });
-    }
 
     // Generate Q&A data using the AI service
-    const qaData = await AiService.generateQaSet(documentText, prompt, marksDistribution);
+    const qaData = await AiService.generateQaSet(fileId, prompt, marksDistribution);
     
     if (!qaData || !Array.isArray(qaData) || qaData.length === 0) {
       throw new Error('AI service returned invalid or empty Q&A data');

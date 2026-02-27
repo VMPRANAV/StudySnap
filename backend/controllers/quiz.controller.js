@@ -1,9 +1,9 @@
 const AiService = require('../services/ai.service');
 const Quiz = require('../models/quiz.model');
 const QuizService = require('../services/quiz.service');
-
+const Chunk = require('../models/chunk.model');
 // Using a simple in-memory cache for extracted text (similar to flashcard controller)
-const textCache = new Map();
+
 
 exports.processPdfForQuiz = async (req, res) => {
   try {
@@ -12,11 +12,13 @@ exports.processPdfForQuiz = async (req, res) => {
     }
 
     // Extract text from PDF instead of creating vector store
-    const documentText = await AiService.extractTextFromPdf(req.file.path);
-    const fileId = req.file.originalname; // Use filename as a simple ID
-    textCache.set(fileId, documentText);
+    const userId = req.user.id;
+    const fileId = req.file.originalname;
 
-    res.status(200).json({ fileId });
+    await Chunk.deleteMany({ fileId, userId }); // Keep DB clean
+    const chunkCount = await AiService.extractAndStorePdf(req.file.path, userId, fileId);
+
+    res.status(200).json({ fileId ,chunkCount});
   } catch (error) {
     console.error('Error processing PDF for quiz:', error);
     res.status(500).json({ message: 'Failed to process PDF.' });
@@ -33,49 +35,8 @@ exports.generateQuiz = async (req, res) => {
     });
 
     const { fileId, prompt } = req.body;
+const quizData = await AiService.generateQuiz(fileId, prompt);
 
-    // Validate required fields
-    if (!fileId) {
-      return res.status(400).json({ message: 'fileId is required.' });
-    }
-
-    if (!prompt) {
-      return res.status(400).json({ message: 'prompt is required.' });
-    }
-
-    // Validate user is authenticated
-    if (!req.user || !req.user.id) {
-      return res.status(401).json({ message: 'User authentication required.' });
-    }
-
-    const documentText = textCache.get(fileId);
-
-    if (!documentText) {
-      console.error('Document text not found in cache for fileId:', fileId);
-      console.log('Available cache keys:', Array.from(textCache.keys()));
-      return res.status(404).json({ 
-        message: 'File not processed or expired. Please upload the PDF again.',
-        availableFiles: Array.from(textCache.keys()) // For debugging
-      });
-    }
-
-    console.log('Document text length:', documentText.length);
-    console.log('Calling AiService.generateQuiz...');
-
-    // Generate quiz data
-    const quizData = await AiService.generateQuiz(documentText, prompt);
-    
-    console.log('Quiz data generated:', {
-      questionsCount: quizData?.length,
-      firstQuestion: quizData?.[0]
-    });
-
-    // Validate quiz data
-    if (!quizData || !Array.isArray(quizData) || quizData.length === 0) {
-      throw new Error('AI service returned invalid or empty quiz data');
-    }
-
-    // Create quiz with authenticated user's ID
     const newQuiz = new Quiz({ 
       userId: req.user.id,
       sourceFileId: fileId,
@@ -84,21 +45,11 @@ exports.generateQuiz = async (req, res) => {
     });
 
     await newQuiz.save();
-
-    console.log('Quiz saved successfully:', newQuiz._id);
-
     res.status(201).json(newQuiz);
   } catch (error) {
-    console.error('Error generating quiz:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name
-    });
-    res.status(500).json({ 
-      message: 'Failed to generate quiz.',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    res.status(500).json({ message: 'Failed to generate quiz.' });
   }
+    
 };
 
 exports.getQuizzes = async (req, res) => {
@@ -107,6 +58,7 @@ exports.getQuizzes = async (req, res) => {
     if (!req.user || !req.user.id) {
       return res.status(401).json({ message: 'User authentication required.' });
     }
+    
 
     // Get only quizzes belonging to the authenticated user
     const quizzes = await Quiz.find({ userId: req.user.id })

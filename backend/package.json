@@ -12,16 +12,23 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@langchain/community": "^0.3.57",
+    "@google/generative-ai": "^0.24.1",
+    "@langchain/community": "^1.1.19",
+    "@langchain/core": "^1.1.28",
+    "@langchain/google-genai": "^2.1.21",
+    "@langchain/mongodb": "^1.1.0",
+    "@langchain/textsplitters": "^1.0.1",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
     "groq-sdk": "^0.33.0",
-    "langchain": "^0.3.35",
+    "jsonwebtoken": "^9.0.3",
+    "langchain": "^1.2.27",
+    "mongodb": "^7.1.0",
     "mongoose": "^8.19.1",
     "multer": "^2.0.2",
-    "pdf-parse": "^1.1.1",
+    "pdf-parse": "^1.1.4",
     "pdfkit": "^0.17.2"
   }
 }

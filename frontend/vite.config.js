@@ -4,6 +4,9 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  build: {
+    outDir: 'build',
+  },
   server: {
     host: '0.0.0.0', // You should keep this
     
