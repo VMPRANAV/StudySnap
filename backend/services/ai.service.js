@@ -1,59 +1,39 @@
 // --- Step 1: Import Core Dependencies ---
+const axios = require('axios'); 
 const { Groq } = require('groq-sdk');
-const { PDFLoader } = require("@langchain/community/document_loaders/fs/pdf");
-const { RecursiveCharacterTextSplitter } = require("@langchain/textsplitters");
-const { GoogleGenerativeAIEmbeddings } = require("@langchain/google-genai");
-const { TaskType } = require("@google/generative-ai");
 const Chunk= require('../models/chunk.model');
 // --- Step 2: Initialize the Groq client ---
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
-const embeddings = new GoogleGenerativeAIEmbeddings({
-  apiKey: process.env.GEMINI_API_KEY,
-  model: "gemini-embedding-001", // Or "text-embedding-004"
-  taskType: TaskType.RETRIEVAL_DOCUMENT,
-  dimensions: 768, // Add this line to fix the mismatch
-});
-
+const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
 
 class AiService {
   
   static async extractAndStorePdf(pdfPath,userId,fileId) {
-    const loader = new PDFLoader(pdfPath);
-    const docs = await loader.load();
-   const fullText= docs.map((doc) => doc.pageContent).join("\n\n");
-  const splitter = new RecursiveCharacterTextSplitter({
-    chunkSize:1000,
-    chunkOverlap:200,
-  });
-  const splitDocs = await splitter.createDocuments([fullText]);
-  const chunkDocs=[];
-  for(const doc of splitDocs){
-    const vector =await this.generateEmbedding(doc.pageContent);
-    chunkDocs.push({
-      fileId:fileId,
-      userId: userId,
-      text:doc.pageContent,
-      embedding:vector
-
-    });
-
-    
+    try{
+      await Chunk.deleteMany({fileId,userId});
+      const response = await axios.post(`${AI_SERVICE_URL}/process-pdf`,{
+        pdf_path:pdfPath,
+        user_id:userId,
+        file_id:fileId
+      })
+        return response.data.chunks_processed;
+    }
+  catch(error){
+console.error("FASTAPI Communication Error:",error.message);
+throw new Error("AI Processing service is currently unavailable.");
   }
-      await Chunk.insertMany(chunkDocs);
-  return chunkDocs.length;
-  }
+}
 // Generate Embeddings
 static async generateEmbedding(text){
   try{
-
-
-    return await embeddings.embedQuery(text);;
+const response= await axios.post(`${AI_SERVICE_URL}/embed`,{text});
+return response.data.embedding;
   }
   catch(error){
-    console.error("Gemini Embedding Error:",error);
-    throw new Error("Failed to generate embedding vector");
+  console.error("Embedding Service Error:", error.message);
+      throw new Error("Could not connect to AI embedding service.");
   }
 }
 static async retrieveContext(fileId,query){

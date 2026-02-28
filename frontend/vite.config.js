@@ -12,7 +12,7 @@ export default defineConfig({
     
     // Add the allowedHosts property below
     allowedHosts: [
-      '2aed94cda9c6.ngrok-free.app' 
+      'https://study-snap-one.vercel.app' 
     ],
   },
   plugins: [
