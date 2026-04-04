@@ -12,7 +12,7 @@ const groq = new Groq({
 const embeddings = new GoogleGenerativeAIEmbeddings({
   apiKey: process.env.GEMINI_API_KEY,
   model: "gemini-embedding-001", // Or "text-embedding-004"
-  taskType: TaskType.RETRIEVAL_DOCUMENT,
+ taskType: isQuery ? TaskType.RETRIEVAL_QUERY : TaskType.RETRIEVAL_DOCUMENT,
   dimensions: 768, // Add this line to fix the mismatch
 });
 
@@ -28,6 +28,7 @@ class AiService {
     chunkOverlap:200,
   });
   const splitDocs = await splitter.createDocuments([fullText]);
+    const embeddingModel = this.getEmbeddingsModel(false);
   const chunkDocs=[];
   for(const doc of splitDocs){
     const vector =await this.generateEmbedding(doc.pageContent);
@@ -58,6 +59,7 @@ static async generateEmbedding(text){
 }
 static async retrieveContext(fileId,query){
   const queryVector= await this.generateEmbedding(query);
+  const embeddingModel = this.getEmbeddingsModel(true);
   const relevantChunks= await Chunk.aggregate([{
     "$vectorSearch": {
       "index": "vector_index",
@@ -96,107 +98,108 @@ static async retrieveContext(fileId,query){
     }
   }
 
-  /**
-   * 5. Updated Flashcard Generation (Using RAG)
-   */
-  static async generateFlashcards(fileId, userQuery) {
-    try {
-      const context = await this.retrieveContext(fileId, userQuery);
+ static async generateFlashcards(fileId, userQuery) {
+  try {
+    // 1. Query Expansion: If user asks for definitions, we help the vector search 
+    // by adding synonyms like 'terminology' or 'glossary'.
+    const expandedQuery = userQuery.toLowerCase().includes("definition") 
+      ? `${userQuery} key terms, glossary, concepts, meaning` 
+      : userQuery;
 
-      const prompt = `Based on the following document context, generate flashcards.
-Context:
-${context}
+    const context = await this.retrieveContext(fileId, expandedQuery);
 
-User Request: ${userQuery}
-Return ONLY a valid JSON array: [{"question": "...", "answer": "..."}]`;
+    const prompt = `
+      SYSTEM: You are a strict document-parsing assistant.
+      Use ONLY the provided Context to generate flashcards.
+      If the information is not in the Context, return an empty array [].
+      Do not use your own internal knowledge.
 
-      const chatCompletion = await groq.chat.completions.create({
-        messages: [{ role: "user", content: prompt }],
-        model: "llama-3.3-70b-versatile",
-        temperature: 0.8,
-      });
+      Context:
+      ${context}
 
-      return this.cleanAndParseJSON(chatCompletion.choices[0].message.content);
-    } catch (error) {
-      throw new Error(`Flashcard generation failed: ${error.message}`);
-    }
+      User Request: ${userQuery}
+      
+      Return ONLY a valid JSON array of objects: [{"question": "...", "answer": "..."}]`;
+
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [{ role: "user", content: prompt }],
+      model: "llama-3.3-70b-versatile",
+      temperature: 0.1, // LOW temperature is critical to prevent generic "hallucinations"
+      response_format: { "type": "json_object" }
+    });
+
+    return this.cleanAndParseJSON(chatCompletion.choices[0].message.content);
+  } catch (error) {
+    throw new Error(`Flashcard generation failed: ${error.message}`);
   }
+}
 
-  /**
-   * 6. Updated Quiz Generation (Using RAG)
-   */
-  static async generateQuiz(fileId, userQuery) {
-    try {
-      const context = await this.retrieveContext(fileId, userQuery);
+/**
+ * Optimized Quiz Generation
+ * Ensures distractors (wrong options) are also context-relevant.
+ */
+static async generateQuiz(fileId, userQuery) {
+  try {
+    const context = await this.retrieveContext(fileId, userQuery);
 
-      const prompt = `Based on the following document context, generate an MCQ quiz.
-Context:
-${context}
+    const prompt = `
+      SYSTEM: Generate a quiz based SOLELY on the provided context.
+      Context:
+      ${context}
 
-User Request: ${userQuery}
-Return ONLY a valid JSON array of objects with "questionText", "options" (4 strings), and "correctAnswerIndex" (0-3).`;
+      Task: Generate an MCQ quiz for: ${userQuery}
+      Requirement: Ensure all questions and answers are derived from the text above.
+      
+      Return ONLY a valid JSON array: [{"questionText": "...", "options": ["...", "...", "...", "..."], "correctAnswerIndex": 0}]`;
 
-      const chatCompletion = await groq.chat.completions.create({
-        messages: [{ role: "user", content: prompt }],
-        model: "llama-3.3-70b-versatile",
-        temperature: 0.5,
-      });
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [{ role: "user", content: prompt }],
+      model: "llama-3.3-70b-versatile",
+      temperature: 0.2, 
+      response_format: { "type": "json_object" }
+    });
 
-      const parsedQuiz = this.cleanAndParseJSON(chatCompletion.choices[0].message.content);
-
-      // Validation logic
-      for (const q of parsedQuiz) {
-        if (!q.questionText || q.options.length !== 4) throw new Error("Invalid quiz structure");
-      }
-
-      return parsedQuiz;
-    } catch (error) {
-      throw new Error(`Quiz generation failed: ${error.message}`);
-    }
+    return this.cleanAndParseJSON(chatCompletion.choices[0].message.content);
+  } catch (error) {
+    throw new Error(`Quiz generation failed: ${error.message}`);
   }
+}
 
+/**
+ * Optimized Q&A Set
+ * Handles the distribution of marks while maintaining document grounding.
+ */
 static async generateQaSet(fileId, userQuery, marksDistribution) {
   try {
-    // 1. Vector Search with a higher limit for detailed answers
-    const queryVector = await this.generateEmbedding(userQuery);
-    const relevantChunks = await Chunk.aggregate([
-      {
-        "$vectorSearch": {
-          "index": "vector_index",
-          "path": "embedding",
-          "queryVector": queryVector,
-          "numCandidates": 150,
-          "limit": 8, // More context for longer answers
-          "filter": { "fileId": fileId }
-        }
-      }
-    ]);
-
-    const contextText = relevantChunks.map(c => c.text).join("\n\n");
+    // Use retrieveContext (which should use RETRIEVAL_QUERY task type)
+    const contextText = await this.retrieveContext(fileId, userQuery);
 
     const marksRequest = Object.entries(marksDistribution)
       .map(([marks, count]) => `- ${count} question(s) worth ${marks} marks each`)
       .join("\n");
 
     const prompt = `
-      Context from Study Document:
+      SYSTEM: You are an exam paper generator. You must use ONLY the provided Context.
+      Context:
       ${contextText}
 
-      Task: Generate questions for the topic "${userQuery}".
-      
+      Task: Generate questions for: "${userQuery}".
       Requirements:
       ${marksRequest}
 
-      Instructions:
-      - Detail must match the marks (e.g., 14-mark answers must be comprehensive).
-      - Return ONLY a JSON array: [{"question": "...", "answer": "...", "marks": number}]
+      Strict Instructions:
+      - For high-mark questions (e.g., 10+ marks), provide long, structured, and comprehensive answers from the text.
+      - Do not provide information not found in the Context.
+      
+      Return ONLY a JSON array: [{"question": "...", "answer": "...", "marks": number}]
     `;
 
     const chatCompletion = await groq.chat.completions.create({
       messages: [{ role: "user", content: prompt }],
       model: "llama-3.3-70b-versatile",
-      temperature: 0.5,
-      max_completion_tokens: 4096, // High limit for long answers
+      temperature: 0.1,
+      max_completion_tokens: 4096,
+      response_format: { "type": "json_object" }
     });
 
     return this.cleanAndParseJSON(chatCompletion.choices[0].message.content);
