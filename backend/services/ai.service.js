@@ -139,7 +139,7 @@ Return ONLY a valid JSON array of objects with "questionText", "options" (4 stri
       const chatCompletion = await groq.chat.completions.create({
         messages: [{ role: "user", content: prompt }],
         model: "llama-3.3-70b-versatile",
-        temperature: 0.8,
+        temperature: 0.5,
       });
 
       const parsedQuiz = this.cleanAndParseJSON(chatCompletion.choices[0].message.content);
@@ -195,7 +195,7 @@ static async generateQaSet(fileId, userQuery, marksDistribution) {
     const chatCompletion = await groq.chat.completions.create({
       messages: [{ role: "user", content: prompt }],
       model: "llama-3.3-70b-versatile",
-      temperature: 0.7,
+      temperature: 0.5,
       max_completion_tokens: 4096, // High limit for long answers
     });
 
