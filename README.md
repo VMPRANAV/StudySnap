@@ -46,9 +46,9 @@ StudySnap simplifies exam preparation by converting static notes into dynamic st
 
 ## 📂 Project Structure
 
-The repository is organized into two main directories:
+The repository is organized into three main directories:
 
 ```text
 ├── frontend/   # React application source code
-└── backend/    # Node.js/Express server and AI logic
-                # (ai.service.js handles AI generation logic)
+├── backend/    # Node.js/Express public API (JWT + persistence)
+└── ai-fastapi/  # FastAPI internal AI service (PDF+RAG+generation)

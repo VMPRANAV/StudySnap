@@ -4,7 +4,10 @@ const quizController = require('../controllers/quiz.controller');
 const { protect } = require('../middleware/auth.middleware');
 const router = express.Router();
 
-const upload = multer({ dest: 'uploads/' });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+});
 
 // Route to upload a PDF and process it into a vector store for quizzes
 router.post('/upload', protect,upload.single('file'), quizController.processPdfForQuiz);

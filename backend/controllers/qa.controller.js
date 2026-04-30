@@ -1,9 +1,15 @@
-const AiService = require('../services/ai.service');
 const QaSet = require('../models/qaSet.model');
 const PDFDocument = require('pdfkit');
-const Chunk = require('../models/chunk.model');
-// Using a simple in-memory cache for extracted text, same as other controllers
+const { AiFastApiError, indexPdf, generateQa } = require('../services/aiFastApi.client');
 
+function mapAiError(err) {
+  if (err instanceof AiFastApiError) {
+    if (err.code === 'CONFIG') return { status: 500, message: err.message };
+    if (err.code === 'TIMEOUT') return { status: 504, message: err.message };
+    return { status: 502, message: err.message };
+  }
+  return { status: 503, message: 'AI service unreachable' };
+}
 
 exports.processPdfForQa = async (req, res) => {
   try {
@@ -12,14 +18,18 @@ exports.processPdfForQa = async (req, res) => {
     }
 const userId = req.user.id;
     const fileId = req.file.originalname;
-   await Chunk.deleteMany({ fileId, userId });
-
-const chunkCount = await AiService.extractAndStorePdf(req.file.path, userId, fileId);
+    const { chunkCount } = await indexPdf({
+      userId,
+      fileId,
+      filename: req.file.originalname,
+      pdfBuffer: req.file.buffer,
+    });
 res.status(200).json({ fileId, chunkCount, message: "Ready for Q&A generation" });
  
   } catch (error) {
     console.error('Error processing PDF for Q&A:', error);
-    res.status(500).json({ message: 'Failed to process PDF.' });
+    const mapped = mapAiError(error);
+    res.status(mapped.status).json({ message: mapped.message });
   }
 };
 
@@ -42,7 +52,12 @@ exports.generateQaSet = async (req, res) => {
 
 
     // Generate Q&A data using the AI service
-    const qaData = await AiService.generateQaSet(fileId, prompt, marksDistribution);
+    const qaData = await generateQa({
+      userId: req.user.id,
+      fileId,
+      prompt,
+      marksDistribution,
+    });
     
     if (!qaData || !Array.isArray(qaData) || qaData.length === 0) {
       throw new Error('AI service returned invalid or empty Q&A data');
@@ -65,7 +80,8 @@ exports.generateQaSet = async (req, res) => {
       message: error.message,
       stack: error.stack,
     });
-    res.status(500).json({ message: 'Failed to generate Q&A set.' });
+    const mapped = mapAiError(error);
+    res.status(mapped.status).json({ message: mapped.message, error: error.message });
   }
 };
 

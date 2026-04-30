@@ -6,7 +6,10 @@ const { protect } = require('../middleware/auth.middleware');
 const router = express.Router();
 
 // Use multer for handling multipart/form-data, primarily for file uploads
-const upload = multer({ dest: 'uploads/' });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+});
 
 // Route to upload a PDF and process it into a vector store for flashcards
 router.post('/upload',protect, upload.single('file'), flashcardController.processPdfForFlashcards);

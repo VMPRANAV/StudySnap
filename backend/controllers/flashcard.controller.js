@@ -1,8 +1,14 @@
-const AiService = require('../services/ai.service');
 const FlashcardSet = require('../models/flashcardSet.model');
-const Chunk = require('../models/chunk.model');
-// Using a simple in-memory cache for extracted text
+const { AiFastApiError, indexPdf, generateFlashcards } = require('../services/aiFastApi.client');
 
+function mapAiError(err) {
+  if (err instanceof AiFastApiError) {
+    if (err.code === 'CONFIG') return { status: 500, message: err.message };
+    if (err.code === 'TIMEOUT') return { status: 504, message: err.message };
+    return { status: 502, message: err.message };
+  }
+  return { status: 503, message: 'AI service unreachable' };
+}
 
 exports.processPdfForFlashcards = async (req, res) => {
   try {
@@ -17,13 +23,18 @@ exports.processPdfForFlashcards = async (req, res) => {
     // Extract text from PDF instead of creating vector store
     const userId = req.user.id;
     const fileId = req.file.originalname; // Use filename as a simple ID
-   await Chunk.deleteMany({ fileId, userId });
-   const chunkCount = await AiService.extractAndStorePdf(req.file.path, userId, fileId);
+    const { chunkCount } = await indexPdf({
+      userId,
+      fileId,
+      filename: req.file.originalname,
+      pdfBuffer: req.file.buffer,
+    });
 
     res.status(200).json({ fileId, chunkCount, message: "PDF indexed successfully" });
   } catch (error) {
     console.error('Error processing PDF for flashcards:', error);
-    res.status(500).json({ message: 'Failed to process PDF.' });
+    const mapped = mapAiError(error);
+    res.status(mapped.status).json({ message: mapped.message });
   }
 };
 
@@ -31,7 +42,11 @@ exports.generateFlashcards = async (req, res) => {
   try {
     const { fileId, prompt } = req.body;
 
-    const flashcards = await AiService.generateFlashcards(fileId, prompt);
+    const flashcards = await generateFlashcards({
+      userId: req.user.id,
+      fileId,
+      prompt,
+    });
 
     const newSet = new FlashcardSet({ 
       userId: req.user.id,
@@ -44,7 +59,8 @@ exports.generateFlashcards = async (req, res) => {
     res.status(201).json(newSet);
   } catch (error) {
     console.error('Error generating flashcards:', error);
-    res.status(500).json({ message: 'Failed to generate flashcards.', error: error.message });
+    const mapped = mapAiError(error);
+    res.status(mapped.status).json({ message: mapped.message, error: error.message });
   }
 };
 

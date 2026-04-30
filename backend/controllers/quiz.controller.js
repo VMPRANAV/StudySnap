@@ -1,9 +1,15 @@
-const AiService = require('../services/ai.service');
 const Quiz = require('../models/quiz.model');
 const QuizService = require('../services/quiz.service');
-const Chunk = require('../models/chunk.model');
-// Using a simple in-memory cache for extracted text (similar to flashcard controller)
+const { AiFastApiError, indexPdf, generateQuiz } = require('../services/aiFastApi.client');
 
+function mapAiError(err) {
+  if (err instanceof AiFastApiError) {
+    if (err.code === 'CONFIG') return { status: 500, message: err.message };
+    if (err.code === 'TIMEOUT') return { status: 504, message: err.message };
+    return { status: 502, message: err.message };
+  }
+  return { status: 503, message: 'AI service unreachable' };
+}
 
 exports.processPdfForQuiz = async (req, res) => {
   try {
@@ -15,13 +21,18 @@ exports.processPdfForQuiz = async (req, res) => {
     const userId = req.user.id;
     const fileId = req.file.originalname;
 
-    await Chunk.deleteMany({ fileId, userId }); // Keep DB clean
-    const chunkCount = await AiService.extractAndStorePdf(req.file.path, userId, fileId);
+    const { chunkCount } = await indexPdf({
+      userId,
+      fileId,
+      filename: req.file.originalname,
+      pdfBuffer: req.file.buffer,
+    });
 
     res.status(200).json({ fileId ,chunkCount});
   } catch (error) {
     console.error('Error processing PDF for quiz:', error);
-    res.status(500).json({ message: 'Failed to process PDF.' });
+    const mapped = mapAiError(error);
+    res.status(mapped.status).json({ message: mapped.message });
   }
 };
 
@@ -35,7 +46,11 @@ exports.generateQuiz = async (req, res) => {
     });
 
     const { fileId, prompt } = req.body;
-const quizData = await AiService.generateQuiz(fileId, prompt);
+    const quizData = await generateQuiz({
+      userId: req.user.id,
+      fileId,
+      prompt,
+    });
 
     const newQuiz = new Quiz({ 
       userId: req.user.id,
@@ -47,7 +62,9 @@ const quizData = await AiService.generateQuiz(fileId, prompt);
     await newQuiz.save();
     res.status(201).json(newQuiz);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to generate quiz.' });
+    console.error('Error generating quiz:', error);
+    const mapped = mapAiError(error);
+    res.status(mapped.status).json({ message: mapped.message, error: error.message });
   }
     
 };
