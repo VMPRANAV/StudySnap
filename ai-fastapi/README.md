@@ -15,4 +15,3 @@ Internal AI processing service used by the Node backend.
 ## Notes
 - All endpoints are **internal-only** and require `X-AI-Internal-Token`.
 - This service writes/reads from the existing MongoDB `chunks` collection and uses your Atlas Vector Search index `vector_index`.
-

@@ -6,6 +6,7 @@ function mapAiError(err) {
   if (err instanceof AiFastApiError) {
     if (err.code === 'CONFIG') return { status: 500, message: err.message };
     if (err.code === 'TIMEOUT') return { status: 504, message: err.message };
+    if (err.code === 'UNREACHABLE') return { status: 503, message: err.message };
     return { status: 502, message: err.message };
   }
   return { status: 503, message: 'AI service unreachable' };

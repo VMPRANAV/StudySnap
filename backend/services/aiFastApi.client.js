@@ -1,10 +1,10 @@
 class AiFastApiError extends Error {
   /**
    * @param {string} message
-   * @param {{ status?: number, code?: string, details?: any }} [opts]
+   * @param {{ status?: number, code?: string, details?: any, cause?: any }} [opts]
    */
   constructor(message, opts = {}) {
-    super(message);
+    super(message, opts.cause ? { cause: opts.cause } : undefined);
     this.name = 'AiFastApiError';
     this.status = opts.status;
     this.code = opts.code;
@@ -37,7 +37,14 @@ async function fetchWithTimeout(url, options) {
         code: 'TIMEOUT',
       });
     }
-    throw err;
+    throw new AiFastApiError(`AI service unreachable (${url})`, {
+      code: 'UNREACHABLE',
+      details: {
+        message: err?.message,
+        cause: err?.cause,
+      },
+      cause: err,
+    });
   } finally {
     clearTimeout(timeout);
   }
@@ -103,8 +110,9 @@ async function indexPdf({ userId, fileId, pdfBuffer, filename }) {
   form.append('file_id', String(fileId));
 
   const safeName = filename || fileId || 'document.pdf';
-  const file = new File([pdfBuffer], safeName, { type: 'application/pdf' });
-  form.append('file', file);
+  // Avoid relying on global `File` (not available in some Node runtimes).
+  const blob = new Blob([pdfBuffer], { type: 'application/pdf' });
+  form.append('file', blob, safeName);
 
   const res = await fetchWithTimeout(url, {
     method: 'POST',

@@ -10,6 +10,16 @@ const qaRoutes= require('./routes/qa.routes')
 const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 5001;
+
+if (process.env.NODE_ENV === 'production' && typeof process.env.FASTAPI_AI_URL === 'string') {
+  const aiUrl = process.env.FASTAPI_AI_URL;
+  if (aiUrl.includes('localhost') || aiUrl.includes('127.0.0.1')) {
+    console.warn(
+      '[WARN] FASTAPI_AI_URL points to localhost in production. ' +
+        'On Render this usually means your FastAPI service is a separate deployment; set FASTAPI_AI_URL to its public/internal URL.'
+    );
+  }
+}
 app.use(cors(
   // {
   //   origin: [
