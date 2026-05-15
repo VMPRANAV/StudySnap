@@ -43,7 +43,7 @@ StudySnap simplifies exam preparation by converting static notes into dynamic st
 | **Frontend**     | React (Vite) |
 | **Backend**      | Node.js + Express |
 | **Database**     | MongoDB |
-| **AI Model**     | LLaMA 3.3 (Single-agent NLP workflow) CREW AI LANGCHAIN|
+| **AI Model**     | LLaMA 3.3 (Single-agent NLP workflow RAG LANGCHAIN|
 | **Authentication** | JWT (JSON Web Tokens) |
 | **Deployment**   | Vercel (Frontend), Render (Backend) |
 
