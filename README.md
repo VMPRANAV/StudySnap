@@ -5,6 +5,11 @@
 **StudySnap** is an intelligent study aid that leverages Artificial Intelligence to transform study materials into interactive learning tools. It focuses on optimizing revision through active recall and gamification.
 
 ---
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=jc-SEWqL3JQ">
+    <img src="https://img.youtube.com/vi/jc-SEWqL3JQ/0.jpg" alt="StudySnap Technical Demo">
+  </a>
+</p>
 
 ## 📖 Overview
 
