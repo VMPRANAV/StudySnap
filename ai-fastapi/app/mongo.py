@@ -48,7 +48,7 @@ async def vector_search(
                 "queryVector": query_vector,
                 "numCandidates": num_candidates,
                 "limit": limit,
-                "filter": {"fileId": file_id, "userId": user_id},
+                "filter": {"fileId": str(file_id), "userId": str(user_id)}, # Cast both to strings
             }
         }
     ]
