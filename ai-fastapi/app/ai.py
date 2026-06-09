@@ -100,7 +100,6 @@ def _infer_count(prompt: str) -> int | None:
                 return None
     return None
 
-
 async def index_pdf(
     client: httpx.AsyncClient,
     *,
@@ -120,15 +119,21 @@ async def index_pdf(
     )
     await delete_chunks(user_id, file_id)
 
-    # FIX: Fire off all embedding network requests concurrently via asyncio.gather
-    # to stop sequential loop blocking and avoid Render 503 timeouts on indexing.
-    tasks = [embed_text(client, c) for c in chunks]
+    # Limit concurrent outgoing requests to 20 at a time to protect the network pipe
+    semaphore = asyncio.Semaphore(20)
+
+    async def throttled_embed(chunk: str):
+        async with semaphore:
+            return await embed_text(client, chunk)
+
+    # Gathers all chunks safely without flooding connection pools
+    tasks = [throttled_embed(c) for c in chunks]
     vectors = await asyncio.gather(*tasks)
 
     docs: list[dict] = [
         {
-            "fileId": str(file_id),   # Force string matching type
-            "userId": str(user_id),   # Convert ObjectId into clean string format
+            "fileId": str(file_id),   
+            "userId": str(user_id),   
             "text": chunk,
             "embedding": vec,
         }
