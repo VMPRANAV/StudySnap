@@ -23,8 +23,7 @@ chunks = _db["chunks"]
 
 
 async def delete_chunks(user_id: ObjectId, file_id: str) -> None:
-    await asyncio.to_thread(chunks.delete_many, {"userId": user_id, "fileId": file_id})
-
+    await asyncio.to_thread(chunks.delete_many, {"userId": str(user_id), "fileId": str(file_id)})
 
 async def insert_chunks(docs: list[dict]) -> None:
     if not docs:
