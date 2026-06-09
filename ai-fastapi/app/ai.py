@@ -119,16 +119,19 @@ async def index_pdf(
     )
     await delete_chunks(user_id, file_id)
 
-    # Limit concurrent outgoing requests to 20 at a time to protect the network pipe
-    semaphore = asyncio.Semaphore(20)
+    # --- ADDED: Rate Throttling Semaphore ---
+    # Limits maximum concurrent connections to Google's API to 10-20 at a time.
+    # This keeps things extremely fast but avoids triggering a 429 Too Many Requests error.
+    semaphore = asyncio.Semaphore(15)
 
     async def throttled_embed(chunk: str):
         async with semaphore:
             return await embed_text(client, chunk)
 
-    # Gathers all chunks safely without flooding connection pools
+    # Safely pool the execution tasks instead of flooding the endpoint
     tasks = [throttled_embed(c) for c in chunks]
     vectors = await asyncio.gather(*tasks)
+    # ----------------------------------------
 
     docs: list[dict] = [
         {
@@ -142,7 +145,6 @@ async def index_pdf(
 
     await insert_chunks(docs)
     return len(docs)
-
 
 async def _retrieve_context(
     client: httpx.AsyncClient,
