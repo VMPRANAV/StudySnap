@@ -73,8 +73,8 @@ async def index_pdf(
 
     docs: list[dict] = [
         {
-            "fileId": file_id,
-            "userId": user_id,
+            "fileId": str(file_id),   # Force string matching type
+            "userId": str(user_id),   # Convert ObjectId into clean string format
             "text": chunk,
             "embedding": vec,
         }
