@@ -15,10 +15,73 @@ class AiFastApiError extends Error {
 const FASTAPI_AI_URL = process.env.FASTAPI_AI_URL;
 const AI_INTERNAL_TOKEN = process.env.AI_INTERNAL_TOKEN;
 const FASTAPI_TIMEOUT_MS = Number(process.env.FASTAPI_TIMEOUT_MS || 120000);
+const NODE_ENV = process.env.NODE_ENV;
+
+function isLocalhostUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
+function getFastApiUrlConfigError() {
+  if (!FASTAPI_AI_URL) {
+    return 'FASTAPI_AI_URL is not configured';
+  }
+
+  try {
+    new URL(FASTAPI_AI_URL);
+  } catch {
+    return 'FASTAPI_AI_URL is invalid. Use a full URL like https://your-fastapi-service.onrender.com';
+  }
+
+  if (NODE_ENV === 'production' && isLocalhostUrl(FASTAPI_AI_URL)) {
+    return (
+      'FASTAPI_AI_URL points to localhost in production. ' +
+      'Set it to your deployed FastAPI service URL instead of http://localhost:8000'
+    );
+  }
+
+  return null;
+}
+
+function extractReadableDetail(body) {
+  if (!body) return null;
+  if (typeof body === 'string') return body;
+  if (typeof body?.detail === 'string') return body.detail;
+  if (typeof body?.message === 'string') return body.message;
+  return null;
+}
+
+function getCandidateUrls(url) {
+  const candidates = [url];
+
+  if (NODE_ENV !== 'development') {
+    return candidates;
+  }
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname === 'localhost') {
+      parsed.hostname = '127.0.0.1';
+      candidates.push(parsed.toString());
+    } else if (parsed.hostname === '127.0.0.1') {
+      parsed.hostname = 'localhost';
+      candidates.push(parsed.toString());
+    }
+  } catch {
+    return candidates;
+  }
+
+  return [...new Set(candidates)];
+}
 
 function assertConfigured() {
-  if (!FASTAPI_AI_URL) {
-    throw new AiFastApiError('FASTAPI_AI_URL is not configured', { code: 'CONFIG' });
+  const fastApiUrlConfigError = getFastApiUrlConfigError();
+  if (fastApiUrlConfigError) {
+    throw new AiFastApiError(fastApiUrlConfigError, { code: 'CONFIG' });
   }
   if (!AI_INTERNAL_TOKEN) {
     throw new AiFastApiError('AI_INTERNAL_TOKEN is not configured', { code: 'CONFIG' });
@@ -26,28 +89,40 @@ function assertConfigured() {
 }
 
 async function fetchWithTimeout(url, options) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FASTAPI_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
-    return res;
-  } catch (err) {
-    if (err?.name === 'AbortError') {
-      throw new AiFastApiError(`AI service request timed out after ${FASTAPI_TIMEOUT_MS}ms`, {
-        code: 'TIMEOUT',
-      });
+  const candidateUrls = getCandidateUrls(url);
+  let lastError;
+
+  for (const candidateUrl of candidateUrls) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FASTAPI_TIMEOUT_MS);
+    try {
+      const res = await fetch(candidateUrl, { ...options, signal: controller.signal });
+      return res;
+    } catch (err) {
+      lastError = err;
+      if (err?.name === 'AbortError') {
+        throw new AiFastApiError(`AI service request timed out after ${FASTAPI_TIMEOUT_MS}ms`, {
+          code: 'TIMEOUT',
+        });
+      }
+    } finally {
+      clearTimeout(timeout);
     }
-    throw new AiFastApiError(`AI service unreachable (${url})`, {
-      code: 'UNREACHABLE',
-      details: {
-        message: err?.message,
-        cause: err?.cause,
-      },
-      cause: err,
-    });
-  } finally {
-    clearTimeout(timeout);
   }
+
+  const localhostProdHint =
+    NODE_ENV === 'production' && isLocalhostUrl(FASTAPI_AI_URL)
+      ? ' This usually means FASTAPI_AI_URL still points to localhost instead of your deployed FastAPI service.'
+      : '';
+  throw new AiFastApiError(`AI service unreachable (${candidateUrls.join(', ')})`, {
+    code: 'UNREACHABLE',
+    details: {
+      message: lastError?.message,
+      cause: lastError?.cause,
+      hint: localhostProdHint.trim() || undefined,
+    },
+    cause: lastError,
+  });
 }
 
 async function readErrorBody(res) {
@@ -61,21 +136,25 @@ async function readErrorBody(res) {
 }
 
 function mapFastApiFailure(res, body) {
+  const detail = extractReadableDetail(body);
   if (res.status === 401 || res.status === 403) {
-    return new AiFastApiError('AI service rejected request (internal auth failed)', {
+    return new AiFastApiError(
+      detail || 'AI service rejected request (internal auth failed)',
+      {
       status: res.status,
       code: 'AI_SERVICE_AUTH',
       details: body,
-    });
+      }
+    );
   }
   if (res.status >= 500) {
-    return new AiFastApiError('AI service failed to process request', {
+    return new AiFastApiError(detail || 'AI service failed to process request', {
       status: res.status,
       code: 'AI_SERVICE_ERROR',
       details: body,
     });
   }
-  return new AiFastApiError('AI service request failed', {
+  return new AiFastApiError(detail || 'AI service request failed', {
     status: res.status,
     code: 'AI_SERVICE_BAD_REQUEST',
     details: body,

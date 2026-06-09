@@ -241,7 +241,14 @@ const handleDragLeave = (e) => {
             }
             
             if (!uploadRes.ok) {
-                throw new Error(`Upload failed: ${uploadRes.status}`);
+                let errMsg = `Upload failed: ${uploadRes.status}`;
+                try {
+                    const errData = await uploadRes.json();
+                    if (errData?.message) {
+                        errMsg = errData.message;
+                    }
+                } catch {}
+                throw new Error(errMsg);
             }
             
             setUploadProgress(50);
@@ -249,8 +256,14 @@ const handleDragLeave = (e) => {
             
             const uploadData = await uploadRes.json();
             const fileId = uploadData.fileId;
+            const chunkCount = uploadData.chunkCount ?? 0;
+
+            if (!chunkCount) {
+                throw new Error('This PDF produced 0 text chunks. It may be scanned/image-only, empty, or not readable as text.');
+            }
+
+            setCurrentStep(`Indexed ${chunkCount} text chunks. Generating flashcards...`);
             
-            setCurrentStep('Generating flashcards with AI...');
             setUploadProgress(75);
             
             const genRes = await fetch(`${backendUrl}/generate`, {

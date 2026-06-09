@@ -6,7 +6,7 @@ import httpx
 from bson import ObjectId
 
 from .config import SETTINGS
-from .mongo import delete_chunks, insert_chunks, vector_search
+from .mongo import delete_chunks, get_chunks_for_file, insert_chunks, vector_search
 from .pdf_utils import extract_text_from_pdf_bytes
 from .providers.gemini_embeddings import embed_text
 from .providers.groq_chat import chat_completion
@@ -14,7 +14,13 @@ from .text_utils import chunk_text, clean_ai_json_text
 
 
 def _parse_ai_json(text: str):
+    if text is None:
+        raise RuntimeError("AI returned no content")
+
     cleaned = clean_ai_json_text(text)
+    if not cleaned:
+        raise RuntimeError("AI returned empty content")
+
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
@@ -23,7 +29,50 @@ def _parse_ai_json(text: str):
         end = cleaned.rfind("]")
         if start != -1 and end != -1 and end > start:
             return json.loads(cleaned[start : end + 1])
+        # Try to salvage the first JSON object in the text
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(cleaned[start : end + 1])
         raise
+
+
+def _ensure_list_payload(data, *, preferred_keys: list[str], label: str):
+    if isinstance(data, list):
+        return data
+
+    if isinstance(data, dict):
+        for key in preferred_keys:
+            value = data.get(key)
+            if isinstance(value, list):
+                return value
+
+        for value in data.values():
+            if isinstance(value, list):
+                return value
+
+    raise RuntimeError(f"{label} output must be a JSON array")
+
+
+def _validate_quiz_payload(data, *, desired: int):
+    data = _ensure_list_payload(
+        data,
+        preferred_keys=["questions", "quiz", "items", "mcqs"],
+        label="Quiz",
+    )
+    for q in data:
+        if not isinstance(q, dict):
+            raise RuntimeError("Quiz items must be objects")
+        options = q.get("options")
+        if not q.get("questionText") or not isinstance(options, list) or len(options) != 4:
+            raise RuntimeError("Invalid quiz structure")
+        idx = q.get("correctAnswerIndex")
+        if not isinstance(idx, int) or idx < 0 or idx > 3:
+            raise RuntimeError("Invalid correctAnswerIndex")
+
+    if len(data) > desired:
+        return data[:desired]
+    return data
 
 
 def _infer_count(prompt: str) -> int | None:
@@ -61,9 +110,14 @@ async def index_pdf(
 ) -> int:
     text = extract_text_from_pdf_bytes(pdf_bytes)
     if not text:
+        print(f"[AI][index_pdf] file_id={file_id} user_id={user_id} extracted_text_chars=0")
         return 0
 
     chunks = chunk_text(text, chunk_size=1000, chunk_overlap=200)
+    print(
+        f"[AI][index_pdf] file_id={file_id} user_id={user_id} "
+        f"extracted_text_chars={len(text)} chunk_count={len(chunks)}"
+    )
     await delete_chunks(user_id, file_id)
 
     # FIX: Fire off all embedding network requests concurrently via asyncio.gather
@@ -103,8 +157,31 @@ async def _retrieve_context(
         num_candidates=num_candidates,
         limit=limit,
     )
+    print(
+        f"[AI][retrieve_context] file_id={file_id} user_id={user_id} "
+        f"query={query!r} result_count={len(results)}"
+    )
+    if not results:
+        fallback_results = await get_chunks_for_file(file_id=file_id, user_id=user_id, limit=limit)
+        print(
+            f"[AI][retrieve_context] vector_search_empty file_id={file_id} "
+            f"user_id={user_id} fallback_result_count={len(fallback_results)}"
+        )
+        results = fallback_results
+
     context = "\n\n".join(r.get("text", "") for r in results if r.get("text"))
     if not context or len(context.strip()) < 50:
+        preview = []
+        for item in results[:3]:
+          preview.append({
+              "fileId": item.get("fileId"),
+              "userId": item.get("userId"),
+              "text_len": len(item.get("text", "")),
+          })
+        print(
+            f"[AI][retrieve_context] insufficient_context file_id={file_id} "
+            f"user_id={user_id} context_chars={len(context.strip())} preview={preview}"
+        )
         raise RuntimeError(
             "No relevant context found for this file. Re-upload/index the PDF, or use a more specific prompt."
         )
@@ -133,10 +210,9 @@ Important:
 Return ONLY a valid JSON array: [{{"question": "...", "answer": "..."}}]"""
 
     content = await chat_completion(client, prompt=ai_prompt, temperature=0.8)
+    print(f"[AI][generate_flashcards] raw_response_preview={content[:300]!r}")
     data = _parse_ai_json(content)
-
-    if not isinstance(data, list):
-        raise RuntimeError("Flashcards output must be a JSON array")
+    data = _ensure_list_payload(data, preferred_keys=["flashcards", "cards", "items"], label="Flashcards")
         
     # FIX: Guard logic parsing schema to verify internal field presence 
     # before returning responses to Node/Mongoose backend pipelines.
@@ -176,23 +252,35 @@ Requirements:
 - Return ONLY a valid JSON array of objects with "questionText", "options" (4 strings), and "correctAnswerIndex" (0-3)."""
 
     content = await chat_completion(client, prompt=ai_prompt, temperature=0.8)
-    data = _parse_ai_json(content)
+    print(f"[AI][generate_quiz] raw_response_preview={content[:300]!r}")
+    try:
+        data = _parse_ai_json(content)
+        return _validate_quiz_payload(data, desired=desired)
+    except Exception as first_error:
+        # Retry once with deterministic settings when the model returns non-JSON text.
+        retry_prompt = f"""Return ONLY valid JSON.
+Generate exactly {desired} MCQ(s) from the context.
+Output schema: [{{"questionText":"...","options":["...","...","...","..."],"correctAnswerIndex":0}}]
+Rules:
+- No markdown fences.
+- No prose.
+- Exactly 4 options per question.
+- correctAnswerIndex must be an integer from 0 to 3.
 
-    if not isinstance(data, list):
-        raise RuntimeError("Quiz output must be a JSON array")
-    for q in data:
-        if not isinstance(q, dict):
-            raise RuntimeError("Quiz items must be objects")
-        options = q.get("options")
-        if not q.get("questionText") or not isinstance(options, list) or len(options) != 4:
-            raise RuntimeError("Invalid quiz structure")
-        idx = q.get("correctAnswerIndex")
-        if not isinstance(idx, int) or idx < 0 or idx > 3:
-            raise RuntimeError("Invalid correctAnswerIndex")
-            
-    if len(data) > desired:
-        return data[:desired]
-    return data
+Context:
+{context}
+
+User Request:
+{prompt}"""
+        retry_content = await chat_completion(client, prompt=retry_prompt, temperature=0.2)
+        print(f"[AI][generate_quiz] retry_response_preview={retry_content[:300]!r}")
+        try:
+            retry_data = _parse_ai_json(retry_content)
+            return _validate_quiz_payload(retry_data, desired=desired)
+        except Exception as retry_error:
+            raise RuntimeError(
+                f"Quiz generation returned invalid JSON after retry: {first_error}"
+            ) from retry_error
 
 
 async def generate_qa(
@@ -228,10 +316,9 @@ Formatting:
 - Answers must be comprehensive and match the marks assigned."""
 
     content = await chat_completion(client, prompt=ai_prompt, temperature=0.7, max_tokens=4096)
+    print(f"[AI][generate_qa] raw_response_preview={content[:300]!r}")
     data = _parse_ai_json(content)
-
-    if not isinstance(data, list):
-        raise RuntimeError("Q&A output must be a JSON array")
+    data = _ensure_list_payload(data, preferred_keys=["questions", "qa", "items"], label="Q&A")
         
     # FIX: Added tight schema contract loops ensuring valid structure type checking
     for item in data:
