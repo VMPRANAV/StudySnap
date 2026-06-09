@@ -7,7 +7,8 @@ from bson import ObjectId
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from .ai import generate_flashcards, generate_qa, generate_quiz, index_pdf
+# Import your unified CrewAI + LangChain Orchestrator suite and helpers
+from .ai import StudySnapAgentOrchestrator, _infer_count, index_pdf
 from .config import SETTINGS
 
 def require_internal_token(
@@ -35,7 +36,7 @@ async def lifespan(app: FastAPI):
         yield
 
 
-app = FastAPI(title="StudySnap AI Service", lifespan=lifespan)
+app = FastAPI(title="StudySnap AI Service Suite", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -79,20 +80,41 @@ async def internal_index(
 async def internal_generate_flashcards(req: GenerateRequest):
     try:
         user_oid = ObjectId(req.user_id)
-        return await generate_flashcards(
-            app.state.http, user_id=user_oid, file_id=req.file_id, prompt=req.prompt
+        
+        # Instantiate the Multi-Agent CrewAI + LangChain Orchestrator
+        orchestrator = StudySnapAgentOrchestrator(
+            client=app.state.http, 
+            user_id=user_oid, 
+            file_id=req.file_id, 
+            prompt=req.prompt
         )
+        
+        # Run the CrewAI workflow pipeline for flashcards
+        return await orchestrator.run_flashcard_workflow()
+        
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Generation failed: {str(e)}")
+        raise HTTPException(status_code=502, detail=f"CrewAI Multi-Agent flashcard execution failed: {str(e)}")
 
 
 @app.post("/internal/generate/quiz", dependencies=[Depends(require_internal_token)])
 async def internal_generate_quiz(req: GenerateRequest):
     try:
         user_oid = ObjectId(req.user_id)
-        return await generate_quiz(app.state.http, user_id=user_oid, file_id=req.file_id, prompt=req.prompt)
+        inferred_count = _infer_count(req.prompt) or 5
+        
+        # Instantiate the Multi-Agent CrewAI + LangChain Orchestrator
+        orchestrator = StudySnapAgentOrchestrator(
+            client=app.state.http, 
+            user_id=user_oid, 
+            file_id=req.file_id, 
+            prompt=req.prompt
+        )
+        
+        # Run the CrewAI workflow pipeline for quizzes
+        return await orchestrator.run_quiz_workflow(desired_count=inferred_count)
+        
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Generation failed: {str(e)}")
+        raise HTTPException(status_code=502, detail=f"CrewAI Multi-Agent quiz execution failed: {str(e)}")
 
 
 @app.post("/internal/generate/qa", dependencies=[Depends(require_internal_token)])
@@ -101,14 +123,19 @@ async def internal_generate_qa(req: GenerateQaRequest):
         user_oid = ObjectId(req.user_id)
         if not isinstance(req.marksDistribution, dict) or not req.marksDistribution:
             raise HTTPException(status_code=400, detail="marksDistribution must be a non-empty object")
-        return await generate_qa(
-            app.state.http,
-            user_id=user_oid,
-            file_id=req.file_id,
-            prompt=req.prompt,
-            marks_distribution=req.marksDistribution,
+            
+        # Instantiate the Multi-Agent CrewAI + LangChain Orchestrator
+        orchestrator = StudySnapAgentOrchestrator(
+            client=app.state.http, 
+            user_id=user_oid, 
+            file_id=req.file_id, 
+            prompt=req.prompt
         )
+        
+        # Run the CrewAI workflow pipeline for descriptive Q&A
+        return await orchestrator.run_qa_workflow(marks_distribution=req.marksDistribution)
+        
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Generation failed: {str(e)}")
+        raise HTTPException(status_code=502, detail=f"CrewAI Multi-Agent Q&A execution failed: {str(e)}")

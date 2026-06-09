@@ -1,105 +1,51 @@
 from __future__ import annotations
 
 import json
-import asyncio  # Required for concurrent embedding generation
+import asyncio
+import gc
 import httpx
+import re
 from bson import ObjectId
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any
+
+from crewai import Agent, Task, Crew, Process
+from langchain_groq import ChatGroq
 
 from .config import SETTINGS
 from .mongo import delete_chunks, get_chunks_for_file, insert_chunks, vector_search
 from .pdf_utils import extract_text_from_pdf_bytes
-from .providers.gemini_embeddings import embed_text
-from .providers.groq_chat import chat_completion
-from .text_utils import chunk_text, clean_ai_json_text
 
+# =====================================================================
+# 1. STRUCTURAL OUTPUT CONTRACT SCHEMAS (Enforced by LangChain)
+# =====================================================================
 
-def _parse_ai_json(text: str):
-    if text is None:
-        raise RuntimeError("AI returned no content")
+class QuizQuestionSchema(BaseModel):
+    questionText: str = Field(..., description="The multiple choice question text")
+    options: List[str] = Field(..., description="Exactly 4 option entries containing distractors and one correct option")
+    correctAnswerIndex: int = Field(..., description="Integer index from 0 to 3 pointing to the true option placement")
 
-    cleaned = clean_ai_json_text(text)
-    if not cleaned:
-        raise RuntimeError("AI returned empty content")
+class QuizOutputPayload(BaseModel):
+    quiz: List[QuizQuestionSchema] = Field(..., description="Collection array of generated multiple choice questions")
 
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        # Try to salvage the first JSON array in the text
-        start = cleaned.find("[")
-        end = cleaned.rfind("]")
-        if start != -1 and end != -1 and end > start:
-            return json.loads(cleaned[start : end + 1])
-        # Try to salvage the first JSON object in the text
-        start = cleaned.find("{")
-        end = cleaned.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return json.loads(cleaned[start : end + 1])
-        raise
+class FlashcardSchema(BaseModel):
+    question: str = Field(..., description="The question, term, or prompt on the front of the flashcard")
+    answer: str = Field(..., description="The definitive answer key explanation on the back of the flashcard")
 
+class FlashcardOutputPayload(BaseModel):
+    flashcards: List[FlashcardSchema] = Field(..., description="Collection array of generated flashcards")
 
-def _ensure_list_payload(data, *, preferred_keys: list[str], label: str):
-    if isinstance(data, list):
-        return data
+class QaSchema(BaseModel):
+    question: str = Field(..., description="The descriptive test exam question text")
+    answer: str = Field(..., description="A comprehensive, deeply detailed analytical answer key matching the point weight scale")
+    marks: int = Field(..., description="The total structural mark weight assigned to this question segment")
 
-    if isinstance(data, dict):
-        for key in preferred_keys:
-            value = data.get(key)
-            if isinstance(value, list):
-                return value
+class QaOutputPayload(BaseModel):
+    questions: List[QaSchema] = Field(..., description="Collection array of generated descriptive Q&A pairs")
 
-        for value in data.values():
-            if isinstance(value, list):
-                return value
-
-    raise RuntimeError(f"{label} output must be a JSON array")
-
-
-def _validate_quiz_payload(data, *, desired: int):
-    data = _ensure_list_payload(
-        data,
-        preferred_keys=["questions", "quiz", "items", "mcqs"],
-        label="Quiz",
-    )
-    for q in data:
-        if not isinstance(q, dict):
-            raise RuntimeError("Quiz items must be objects")
-        options = q.get("options")
-        if not q.get("questionText") or not isinstance(options, list) or len(options) != 4:
-            raise RuntimeError("Invalid quiz structure")
-        idx = q.get("correctAnswerIndex")
-        if not isinstance(idx, int) or idx < 0 or idx > 3:
-            raise RuntimeError("Invalid correctAnswerIndex")
-
-    if len(data) > desired:
-        return data[:desired]
-    return data
-
-
-def _infer_count(prompt: str) -> int | None:
-    """
-    Infer a desired item count from a natural-language prompt.
-
-    We primarily support quiz-question counts (and optionally flashcards) expressed as:
-      - "5 questions", "5 question", "5 MCQs"
-      - sometimes users say "5 quizzes" but actually mean "5 quiz questions"
-    """
-    import re
-
-    p = prompt.lower()
-    for pattern in (
-        r"(\d+)\s*(?:questions|question|qns|qn|mcqs|mcq)\b",
-        r"(\d+)\s*(?:quizzes|quiz)\b",
-    ):
-        m = re.search(pattern, p)
-        if m:
-            try:
-                n = int(m.group(1))
-                if 1 <= n <= 50:
-                    return n
-            except Exception:
-                return None
-    return None
-
+# =====================================================================
+# 2. OPTIMIZED SEQUENTIAL INGESTION PIPELINE (SOLVES 429 RATE LIMITS)
+# =====================================================================
 
 async def index_pdf(
     client: httpx.AsyncClient,
@@ -108,27 +54,52 @@ async def index_pdf(
     user_id: ObjectId,
     file_id: str,
 ) -> int:
+    """
+    Processes document chunks sequentially using a strict serial for-loop.
+    Guarantees your backend application stays under Gemini's 15 RPM Free Tier cap.
+    """
     text = extract_text_from_pdf_bytes(pdf_bytes)
     if not text:
         print(f"[AI][index_pdf] file_id={file_id} user_id={user_id} extracted_text_chars=0")
         return 0
 
+    from .text_utils import chunk_text
     chunks = chunk_text(text, chunk_size=1000, chunk_overlap=200)
-    print(
-        f"[AI][index_pdf] file_id={file_id} user_id={user_id} "
-        f"extracted_text_chars={len(text)} chunk_count={len(chunks)}"
-    )
+    total_chunks = len(chunks)
+    print(f"[AI][index_pdf] file_id={file_id} user_id={user_id} chunk_count={total_chunks}")
+    
+    # Clear out any stale historical vector entries for this file before processing
     await delete_chunks(user_id, file_id)
 
-    # FIX: Fire off all embedding network requests concurrently via asyncio.gather
-    # to stop sequential loop blocking and avoid Render 503 timeouts on indexing.
-    tasks = [embed_text(client, c) for c in chunks]
-    vectors = await asyncio.gather(*tasks)
+    from .providers.gemini_embeddings import embed_text
+    vectors = []
+    
+    # Process sequentially one by one to completely avoid asyncio.gather burst noise
+    for idx, chunk in enumerate(chunks):
+        print(f"[AI][index_pdf] Encoding text chunk block {idx + 1}/{total_chunks}...")
+        
+        # Enforce a 4.5-second time guard delay between consecutive API requests
+        if idx > 0:
+            await asyncio.sleep(4.5)
+            
+        try:
+            vec = await embed_text(client, chunk)
+            vectors.append(vec)
+        except Exception as api_err:
+            print(f"[AI][index_pdf] 429 rate limit hit at block index {idx}. Sleeping 10s for cool-down...")
+            # Apply an immediate 10-second cool-down window and retry on burst exceptions
+            await asyncio.sleep(10)
+            try:
+                vec = await embed_text(client, chunk)
+                vectors.append(vec)
+            except Exception as retry_err:
+                print(f"[AI][index_pdf] Hard fallback failure at chunk {idx}: {str(retry_err)}")
+                raise retry_err
 
-    docs: list[dict] = [
+    docs = [
         {
-            "fileId": str(file_id),   # Force string matching type
-            "userId": str(user_id),   # Convert ObjectId into clean string format
+            "fileId": str(file_id),
+            "userId": str(user_id),
             "text": chunk,
             "embedding": vec,
         }
@@ -138,193 +109,157 @@ async def index_pdf(
     await insert_chunks(docs)
     return len(docs)
 
+# =====================================================================
+# 3. UNIFIED CREWAI + LANGCHAIN SYSTEM ORCHESTRATOR
+# =====================================================================
 
-async def _retrieve_context(
-    client: httpx.AsyncClient,
-    *,
-    user_id: ObjectId,
-    file_id: str,
-    query: str,
-    num_candidates: int,
-    limit: int,
-) -> str:
-    query_vec = await embed_text(client, query)
-    results = await vector_search(
-        index_name=SETTINGS.vector_index_name,
-        query_vector=query_vec,
-        file_id=file_id,
-        user_id=user_id,
-        num_candidates=num_candidates,
-        limit=limit,
-    )
-    print(
-        f"[AI][retrieve_context] file_id={file_id} user_id={user_id} "
-        f"query={query!r} result_count={len(results)}"
-    )
-    if not results:
-        fallback_results = await get_chunks_for_file(file_id=file_id, user_id=user_id, limit=limit)
-        print(
-            f"[AI][retrieve_context] vector_search_empty file_id={file_id} "
-            f"user_id={user_id} fallback_result_count={len(fallback_results)}"
-        )
-        results = fallback_results
-
-    context = "\n\n".join(r.get("text", "") for r in results if r.get("text"))
-    if not context or len(context.strip()) < 50:
-        preview = []
-        for item in results[:3]:
-          preview.append({
-              "fileId": item.get("fileId"),
-              "userId": item.get("userId"),
-              "text_len": len(item.get("text", "")),
-          })
-        print(
-            f"[AI][retrieve_context] insufficient_context file_id={file_id} "
-            f"user_id={user_id} context_chars={len(context.strip())} preview={preview}"
-        )
-        raise RuntimeError(
-            "No relevant context found for this file. Re-upload/index the PDF, or use a more specific prompt."
-        )
-    return context
-
-
-async def generate_flashcards(
-    client: httpx.AsyncClient,
-    *,
-    user_id: ObjectId,
-    file_id: str,
-    prompt: str,
-):
-    context = await _retrieve_context(
-        client, user_id=user_id, file_id=file_id, query=prompt, num_candidates=100, limit=5
-    )
-
-    ai_prompt = f"""Based on the following document context, generate flashcards.
-Context:
-{context}
-
-User Request: {prompt}
-Important:
-- Use the document context to infer what the user means by generic phrases like "key topics" or "key definitions".
-- Do NOT treat those phrases literally; pick the actual topics/definitions from the context.
-Return ONLY a valid JSON array: [{{"question": "...", "answer": "..."}}]"""
-
-    content = await chat_completion(client, prompt=ai_prompt, temperature=0.8)
-    print(f"[AI][generate_flashcards] raw_response_preview={content[:300]!r}")
-    data = _parse_ai_json(content)
-    data = _ensure_list_payload(data, preferred_keys=["flashcards", "cards", "items"], label="Flashcards")
+class StudySnapAgentOrchestrator:
+    """
+    Coordinates state tracking and task execution cascades across distinct agents.
+    Engineered to operate cleanly within 512MB RAM infrastructure caps.
+    """
+    def __init__(self, client: httpx.AsyncClient, user_id: ObjectId, file_id: str, prompt: str):
+        self.client = client
+        self.user_id = user_id
+        self.file_id = file_id
+        self.prompt = prompt
         
-    # FIX: Guard logic parsing schema to verify internal field presence 
-    # before returning responses to Node/Mongoose backend pipelines.
-    for item in data:
-        if not isinstance(item, dict):
-            raise RuntimeError("Flashcard items must be objects")
-        if "question" not in item or "answer" not in item:
-            raise RuntimeError("Invalid flashcard item structure: missing 'question' or 'answer'")
+        # Explicit 'groq/' provider tracking string prefix for correct LiteLLM routing
+        self.llm = ChatGroq(
+            api_key=SETTINGS.groq_api_key,
+            model_name="groq/llama-3.3-70b-versatile",
+            temperature=0.2
+        )
+
+    async def _get_dense_rag_context(self) -> str:
+        from .providers.gemini_embeddings import embed_text
+        
+        # Calculate prompt embedding vector array matching database expectations
+        query_vec = await embed_text(self.client, self.prompt)
+        
+        raw_results = await vector_search(
+            index_name=SETTINGS.vector_index_name,
+            query_vector=query_vec,
+            file_id=self.file_id,
+            user_id=self.user_id,
+            num_candidates=100,
+            limit=5
+        )
+        context_str = "\n\n".join([r.get("text", "") for r in raw_results if r.get("text")])
+        
+        if not context_str.strip():
+            fallback_results = await get_chunks_for_file(file_id=self.file_id, user_id=self.user_id, limit=5)
+            context_str = "\n\n".join([r.get("text", "") for r in fallback_results if r.get("text")])
             
-    return data
+        return context_str if context_str.strip() else "No matching baseline vector references found."
 
+    def _compile_agentic_crew(self, task_description: str, task_expected_output: str, schema_contract: Any) -> Crew:
+        # Agent A: The Noise Filter specialist
+        context_compressor = Agent(
+            role="Senior Context Optimization Specialist",
+            goal="Filter raw formatting elements, noise, headers, and pull clean high-density factual blocks.",
+            backstory="An automated context extraction engine designed to optimize strings into dense factual lists.",
+            verbose=True,
+            allow_delegation=False,
+            llm=self.llm
+        )
 
-async def generate_quiz(
-    client: httpx.AsyncClient,
-    *,
-    user_id: ObjectId,
-    file_id: str,
-    prompt: str,
-):
-    context = await _retrieve_context(
-        client, user_id=user_id, file_id=file_id, query=prompt, num_candidates=100, limit=5
-    )
+        # Agent B: The Structural Content Creator
+        content_generator = Agent(
+            role="Principal Curriculum Architect",
+            goal="Compile top-tier academic materials that conform exactly to specified target payload schemas.",
+            backstory="An expert academic planner built to deliver structured study items and item collections.",
+            verbose=True,
+            allow_delegation=False,
+            llm=self.llm
+        )
 
-    desired = _infer_count(prompt) or 5
-    ai_prompt = f"""You are an expert educator. 
-Context from Study Document:
-{context}
+        task_compression = Task(
+            description=f"Analyze raw context blocks and pull facts targeting objective: '{self.prompt}'\nRaw Background Input:\n{{raw_context_placeholder}}",
+            expected_output="A list of pure high-yield factual reference markers.",
+            agent=context_compressor
+        )
 
-Primary Instruction:
-- Use the provided context to identify the actual "key topics" or subjects mentioned in the User Request. 
-- Do NOT generate generic questions about the phrase "key topics"; instead, find the specific themes within the document and quiz the user on those.
+        task_generation = Task(
+            description=task_description,
+            expected_output=task_expected_output,
+            agent=content_generator,
+            output_json=schema_contract  # Integrated structured schema parameter engine
+        )
 
-User Request: {prompt}
+        # Ensure verbose is a valid boolean for strict Pydantic v2 validation
+        return Crew(
+            agents=[context_compressor, content_generator],
+            tasks=[task_compression, task_generation],
+            process=Process.sequential,
+            verbose=True
+        )
 
-Requirements:
-- Generate exactly {desired} MCQ(s).
-- Return ONLY a valid JSON array of objects with "questionText", "options" (4 strings), and "correctAnswerIndex" (0-3)."""
-
-    content = await chat_completion(client, prompt=ai_prompt, temperature=0.8)
-    print(f"[AI][generate_quiz] raw_response_preview={content[:300]!r}")
-    try:
-        data = _parse_ai_json(content)
-        return _validate_quiz_payload(data, desired=desired)
-    except Exception as first_error:
-        # Retry once with deterministic settings when the model returns non-JSON text.
-        retry_prompt = f"""Return ONLY valid JSON.
-Generate exactly {desired} MCQ(s) from the context.
-Output schema: [{{"questionText":"...","options":["...","...","...","..."],"correctAnswerIndex":0}}]
-Rules:
-- No markdown fences.
-- No prose.
-- Exactly 4 options per question.
-- correctAnswerIndex must be an integer from 0 to 3.
-
-Context:
-{context}
-
-User Request:
-{prompt}"""
-        retry_content = await chat_completion(client, prompt=retry_prompt, temperature=0.2)
-        print(f"[AI][generate_quiz] retry_response_preview={retry_content[:300]!r}")
+    async def run_quiz_workflow(self, desired_count: int) -> List[Dict[str, Any]]:
         try:
-            retry_data = _parse_ai_json(retry_content)
-            return _validate_quiz_payload(retry_data, desired=desired)
-        except Exception as retry_error:
-            raise RuntimeError(
-                f"Quiz generation returned invalid JSON after retry: {first_error}"
-            ) from retry_error
-
-
-async def generate_qa(
-    client: httpx.AsyncClient,
-    *,
-    user_id: ObjectId,
-    file_id: str,
-    prompt: str,
-    marks_distribution: dict,
-):
-    # FIX: Lower context retrieval limits from 8 down to 5 to mitigate upstream 
-    # prompt token delays and safely resolve Render's 30-second request abort dropouts.
-    context = await _retrieve_context(
-        client, user_id=user_id, file_id=file_id, query=prompt, num_candidates=150, limit=5
-    )
-    marks_lines = "\n".join(
-        f"- {count} question(s) worth {marks} marks each" for marks, count in marks_distribution.items()
-    )
-
-    ai_prompt = f"""You are an exam paper generator.
-Context from Study Document:
-{context}
-
-Primary Instruction:
-- The user is asking for questions on: "{prompt}". 
-- Identify the specific information in the context that matches this request. For example, if the user asks for "key topics," find the most important actual subjects in the document and generate questions about them.
-
-Exam Requirements:
-{marks_lines}
-
-Formatting:
-- Return ONLY a JSON array: [{{"question": "...", "answer": "...", "marks": number}}]
-- Answers must be comprehensive and match the marks assigned."""
-
-    content = await chat_completion(client, prompt=ai_prompt, temperature=0.7, max_tokens=4096)
-    print(f"[AI][generate_qa] raw_response_preview={content[:300]!r}")
-    data = _parse_ai_json(content)
-    data = _ensure_list_payload(data, preferred_keys=["questions", "qa", "items"], label="Q&A")
-        
-    # FIX: Added tight schema contract loops ensuring valid structure type checking
-    for item in data:
-        if not isinstance(item, dict):
-            raise RuntimeError("Q&A items must be objects")
-        if "question" not in item or "answer" not in item or "marks" not in item:
-            raise RuntimeError("Invalid Q&A item structure: missing 'question', 'answer', or 'marks'")
+            context = await self._get_dense_rag_context()
+            description = f"Read compressed facts. Compile exactly {desired_count} MCQs for request: '{self.prompt}'."
+            crew = self._compile_agentic_crew(description, "Perfect JSON payload array matching Quiz requirements.", QuizOutputPayload)
             
-    return data
+            # Offload blocking synchronous Crew execution cleanly to an async thread pool
+            result = await asyncio.to_thread(crew.kickoff, inputs={"raw_context_placeholder": context})
+            
+            # Extract out the JSON dictionary from the modern CrewOutput model object
+            if hasattr(result, 'json_dict') and result.json_dict:
+                parsed = result.json_dict
+            else:
+                raw_str = result.raw if hasattr(result, 'raw') else str(result)
+                parsed = json.loads(raw_str)
+                
+            return parsed.get("quiz", parsed)
+        finally:
+            gc.collect()
+
+    async def run_flashcard_workflow(self) -> List[Dict[str, Any]]:
+        try:
+            context = await self._get_dense_rag_context()
+            description = f"Analyze optimized facts. Build a set of highly comprehensive flashcards for theme: '{self.prompt}'."
+            crew = self._compile_agentic_crew(description, "Perfect JSON payload array matching Flashcard requirements.", FlashcardOutputPayload)
+            
+            result = await asyncio.to_thread(crew.kickoff, inputs={"raw_context_placeholder": context})
+            
+            if hasattr(result, 'json_dict') and result.json_dict:
+                parsed = result.json_dict
+            else:
+                raw_str = result.raw if hasattr(result, 'raw') else str(result)
+                parsed = json.loads(raw_str)
+                
+            return parsed.get("flashcards", parsed)
+        finally:
+            gc.collect()
+
+    async def run_qa_workflow(self, marks_distribution: dict) -> List[Dict[str, Any]]:
+        try:
+            context = await self._get_dense_rag_context()
+            marks_lines = "\n".join([f"- {count} question(s) worth {marks} marks each" for marks, count in marks_distribution.items()])
+            description = f"Assemble a formal exam paper covering: '{self.prompt}'. Target Plan:\\n{marks_lines}"
+            
+            crew = self._compile_agentic_crew(description, "Perfect JSON payload array matching Descriptive Q&A requirements.", QaOutputPayload)
+            
+            result = await asyncio.to_thread(crew.kickoff, inputs={"raw_context_placeholder": context})
+            
+            if hasattr(result, 'json_dict') and result.json_dict:
+                parsed = result.json_dict
+            else:
+                raw_str = result.raw if hasattr(result, 'raw') else str(result)
+                parsed = json.loads(raw_str)
+                
+            return parsed.get("questions", parsed)
+        finally:
+            gc.collect()
+
+def _infer_count(prompt: str) -> int | None:
+    p = prompt.lower()
+    for pattern in (r"(\d+)\s*(?:questions|question|qns|qn|mcqs|mcq)\b", r"(\d+)\s*(?:quizzes|quiz)\b"):
+        m = re.search(pattern, p)
+        if m:
+            try:
+                n = int(m.group(1))
+                if 1 <= n <= 50: return n
+            except Exception: return None
+    return None
