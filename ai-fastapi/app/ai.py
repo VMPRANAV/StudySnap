@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import asyncio  # Added for concurrent embedding operations
+import asyncio  # Required for concurrent embedding generation
 import httpx
 from bson import ObjectId
 
@@ -66,12 +66,11 @@ async def index_pdf(
     chunks = chunk_text(text, chunk_size=1000, chunk_overlap=200)
     await delete_chunks(user_id, file_id)
 
-    # BUG FIX: Fire off all embedding network tasks concurrently via asyncio.gather
-    # instead of blocking sequentially chunk-by-chunk inside a loop.
+    # FIX: Fire off all embedding network requests concurrently via asyncio.gather
+    # to stop sequential loop blocking and avoid Render 503 timeouts on indexing.
     tasks = [embed_text(client, c) for c in chunks]
     vectors = await asyncio.gather(*tasks)
 
-    # Build document dictionary array with zipped parallel lists
     docs: list[dict] = [
         {
             "fileId": file_id,
@@ -139,7 +138,8 @@ Return ONLY a valid JSON array: [{{"question": "...", "answer": "..."}}]"""
     if not isinstance(data, list):
         raise RuntimeError("Flashcards output must be a JSON array")
         
-    # BUG FIX: Defensive contract validation to guard against broken keys
+    # FIX: Guard logic parsing schema to verify internal field presence 
+    # before returning responses to Node/Mongoose backend pipelines.
     for item in data:
         if not isinstance(item, dict):
             raise RuntimeError("Flashcard items must be objects")
@@ -189,6 +189,7 @@ Requirements:
         idx = q.get("correctAnswerIndex")
         if not isinstance(idx, int) or idx < 0 or idx > 3:
             raise RuntimeError("Invalid correctAnswerIndex")
+            
     if len(data) > desired:
         return data[:desired]
     return data
@@ -202,8 +203,8 @@ async def generate_qa(
     prompt: str,
     marks_distribution: dict,
 ):
-    # BUG FIX: Reduced 'limit' parameter from 8 to 5 to protect LLM performance 
-    # and reduce processing latency inside Render's 30-second constraint window.
+    # FIX: Lower context retrieval limits from 8 down to 5 to mitigate upstream 
+    # prompt token delays and safely resolve Render's 30-second request abort dropouts.
     context = await _retrieve_context(
         client, user_id=user_id, file_id=file_id, query=prompt, num_candidates=150, limit=5
     )
@@ -232,7 +233,7 @@ Formatting:
     if not isinstance(data, list):
         raise RuntimeError("Q&A output must be a JSON array")
         
-    # BUG FIX: Defensive contract validation to secure correct keys
+    # FIX: Added tight schema contract loops ensuring valid structure type checking
     for item in data:
         if not isinstance(item, dict):
             raise RuntimeError("Q&A items must be objects")
