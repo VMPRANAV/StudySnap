@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-
+import asyncio  # Added for concurrent embedding operations
 import httpx
 from bson import ObjectId
 
@@ -66,17 +66,21 @@ async def index_pdf(
     chunks = chunk_text(text, chunk_size=1000, chunk_overlap=200)
     await delete_chunks(user_id, file_id)
 
-    docs: list[dict] = []
-    for c in chunks:
-        vec = await embed_text(client, c)
-        docs.append(
-            {
-                "fileId": file_id,
-                "userId": user_id,
-                "text": c,
-                "embedding": vec,
-            }
-        )
+    # BUG FIX: Fire off all embedding network tasks concurrently via asyncio.gather
+    # instead of blocking sequentially chunk-by-chunk inside a loop.
+    tasks = [embed_text(client, c) for c in chunks]
+    vectors = await asyncio.gather(*tasks)
+
+    # Build document dictionary array with zipped parallel lists
+    docs: list[dict] = [
+        {
+            "fileId": file_id,
+            "userId": user_id,
+            "text": chunk,
+            "embedding": vec,
+        }
+        for chunk, vec in zip(chunks, vectors)
+    ]
 
     await insert_chunks(docs)
     return len(docs)
@@ -134,6 +138,14 @@ Return ONLY a valid JSON array: [{{"question": "...", "answer": "..."}}]"""
 
     if not isinstance(data, list):
         raise RuntimeError("Flashcards output must be a JSON array")
+        
+    # BUG FIX: Defensive contract validation to guard against broken keys
+    for item in data:
+        if not isinstance(item, dict):
+            raise RuntimeError("Flashcard items must be objects")
+        if "question" not in item or "answer" not in item:
+            raise RuntimeError("Invalid flashcard item structure: missing 'question' or 'answer'")
+            
     return data
 
 
@@ -190,8 +202,10 @@ async def generate_qa(
     prompt: str,
     marks_distribution: dict,
 ):
+    # BUG FIX: Reduced 'limit' parameter from 8 to 5 to protect LLM performance 
+    # and reduce processing latency inside Render's 30-second constraint window.
     context = await _retrieve_context(
-        client, user_id=user_id, file_id=file_id, query=prompt, num_candidates=150, limit=8
+        client, user_id=user_id, file_id=file_id, query=prompt, num_candidates=150, limit=5
     )
     marks_lines = "\n".join(
         f"- {count} question(s) worth {marks} marks each" for marks, count in marks_distribution.items()
@@ -217,4 +231,12 @@ Formatting:
 
     if not isinstance(data, list):
         raise RuntimeError("Q&A output must be a JSON array")
+        
+    # BUG FIX: Defensive contract validation to secure correct keys
+    for item in data:
+        if not isinstance(item, dict):
+            raise RuntimeError("Q&A items must be objects")
+        if "question" not in item or "answer" not in item or "marks" not in item:
+            raise RuntimeError("Invalid Q&A item structure: missing 'question', 'answer', or 'marks'")
+            
     return data
