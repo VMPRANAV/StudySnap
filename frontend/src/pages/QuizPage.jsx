@@ -253,9 +253,6 @@ const pollInterval = setInterval(async () => {
     }
 }, 4000);
 
-return; // Halt standard flow progression since interval loop takes control
-            
-
         } catch (err) {
             console.error('Quiz generation error:', err);
             if (err.message.includes('authentication')) {
@@ -578,6 +575,8 @@ return; // Halt standard flow progression since interval loop takes control
 
 // --- Sub-Components (unchanged except for better error handling) ---
 
+// backend/pages/QuizPage.jsx -> Find SavedQuizzesList and update it:
+
 const SavedQuizzesList = ({ quizzes, onStart }) => {
     if (!quizzes || !quizzes.length) {
         return (
@@ -588,6 +587,51 @@ const SavedQuizzesList = ({ quizzes, onStart }) => {
             </div>
         );
     }
+    return (
+        <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
+            {quizzes.map((quiz, index) => {
+                // Check if the individual item is still processing
+                const isPending = quiz.status === 'pending';
+
+                return (
+                    <motion.button 
+                        key={quiz._id} 
+                        onClick={() => !isPending && onStart(quiz)} // Disable action if pending
+                        disabled={isPending}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: index * 0.1 }}
+                        className={`w-full text-left p-5 rounded-xl flex items-center justify-between group border transition-all duration-300 ${
+                            isPending 
+                                ? 'bg-slate-800/40 border-white/5 opacity-50 cursor-not-allowed' 
+                                : 'bg-gradient-to-r from-white/5 to-white/10 hover:from-white/10 hover:to-white/20 border-white/5 hover:border-white/20'
+                        }`}
+                        whileHover={isPending ? {} : { scale: 1.02 }}
+                    >
+                        <div className="flex items-center gap-4 overflow-hidden">
+                            <div className="p-3 rounded-lg bg-gradient-to-br from-cyan-500/20 to-purple-500/20">
+                                <BookOpenIcon className="h-8 w-8 text-cyan-400" />
+                            </div>
+                            <div className="overflow-hidden">
+                                <p className={`font-semibold text-lg truncate ${isPending ? 'text-slate-400' : 'text-white group-hover:text-cyan-200'} transition-colors`}>
+                                    {quiz.topic}
+                                </p>
+                                <p className="text-sm text-slate-400 mt-1">
+                                    {new Date(quiz.createdAt).toLocaleDateString()} • {isPending ? 'Processing...' : `${quiz.questions?.length || 0} questions`}
+                                </p>
+                            </div>
+                        </div>
+                        {isPending ? (
+                            <div className="w-5 h-5 border-2 border-t-transparent border-cyan-400 rounded-full animate-spin flex-shrink-0" />
+                        ) : (
+                            <ChevronRightIcon className="h-6 w-6 text-slate-500 group-hover:text-cyan-400 transition-colors"/>
+                        )}
+                    </motion.button>
+                );
+            })}
+        </div>
+    );
+};
 
     return (
         <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
