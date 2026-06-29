@@ -1,7 +1,6 @@
+// backend/models/quiz.model.js
 const mongoose = require('mongoose');
 
-// This defines the structure for a single question within a quiz.
-// It is a sub-document schema.
 const questionSchema = new mongoose.Schema({
   questionText: {
     type: String,
@@ -12,7 +11,7 @@ const questionSchema = new mongoose.Schema({
     type: [String],
     required: [true, 'Each question must have options.'],
     validate: [
-      (arr) => arr && arr.length > 1, // Ensure there's at least 2 options
+      (arr) => arr && arr.length > 1,
       'A question must have at least two options.'
     ]
   },
@@ -23,31 +22,40 @@ const questionSchema = new mongoose.Schema({
   }
 }, { _id: false });
 
-// This is the main schema for a complete quiz.
 const quizSchema = new mongoose.Schema({
-  // For linking to a user account in the future.
   userId: {
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'User',
     required: [true, 'A user ID is required.'],
   },
-  // For linking to the PDF the quiz was generated from.
   sourceFileId: {
     type: String,
   },
-  // The user's prompt or topic for the quiz.
   topic: {
     type: String,
     required: [true, 'A topic is required for each quiz.'],
     trim: true,
   },
-  // An array containing all the individual questions for this quiz.
-  questions: [questionSchema],
-}, {
-  // Automatically add 'createdAt' and 'updatedAt' fields.
-  timestamps: true,
+  // --- UPDATED FOR POLLING ---
+  status: {
+    type: String,
+    enum: ['pending', 'completed', 'failed'],
+    default: 'pending',
+    required: true
+  },
+  taskId: {
+    type: String,
+    trim: true
+  },
+  errorDetails: {
+    type: String,
+    trim: true
+  },
+  // ---------------------------
+  questions: [questionSchema], // Stored as empty array [] during 'pending' state
+}, { 
+  timestamps: true 
 });
 
 const Quiz = mongoose.model('Quiz', quizSchema);
-
 module.exports = Quiz;
