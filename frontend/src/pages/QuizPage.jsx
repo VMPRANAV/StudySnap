@@ -633,38 +633,6 @@ const SavedQuizzesList = ({ quizzes, onStart }) => {
     );
 };
 
-    return (
-        <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
-            {quizzes.map((quiz, index) => (
-                <motion.button 
-                    key={quiz._id} 
-                    onClick={() => onStart(quiz)}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                    className="w-full text-left p-5 rounded-xl bg-gradient-to-r from-white/5 to-white/10 hover:from-white/10 hover:to-white/20 transition-all duration-300 flex items-center justify-between group border border-white/5 hover:border-white/20"
-                    whileHover={{ scale: 1.02 }}
-                >
-                    <div className="flex items-center gap-4 overflow-hidden">
-                        <div className="p-3 rounded-lg bg-gradient-to-br from-cyan-500/20 to-purple-500/20">
-                            <BookOpenIcon className="h-8 w-8 text-cyan-400" />
-                        </div>
-                        <div className="overflow-hidden">
-                            <p className="font-semibold text-lg truncate text-white group-hover:text-cyan-200 transition-colors">
-                                {quiz.topic}
-                            </p>
-                            <p className="text-sm text-slate-400 mt-1">
-                                {new Date(quiz.createdAt).toLocaleDateString()} • {quiz.questions?.length || 0} questions
-                            </p>
-                        </div>
-                    </div>
-                    <ChevronRightIcon className="h-6 w-6 text-slate-500 group-hover:text-cyan-400 transition-colors"/>
-                </motion.button>
-            ))}
-        </div>
-    );
-};
-
 const Quizzer = ({ quiz, onSubmit, onBack, isLoading }) => {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [selectedAnswers, setSelectedAnswers] = useState({});
