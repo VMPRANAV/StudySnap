@@ -233,11 +233,28 @@ async function generateQa({ userId, fileId, prompt, marksDistribution }) {
     marksDistribution,
   });
 }
+async function checkTaskStatus(taskId) {
+  assertConfigured();
+  const url = new URL(`/internal/tasks/status/${taskId}`, FASTAPI_AI_URL).toString();
+  
+  const res = await fetchWithTimeout(url, {
+    method: 'GET',
+    headers: {
+      'X-AI-Internal-Token': AI_INTERNAL_TOKEN,
+    },
+  });
 
+  if (!res.ok) {
+    const body = await readErrorBody(res);
+    throw mapFastApiFailure(res, body);
+  }
+  return await res.json(); // Expected return format: { status: 'completed'|'processing'|'failed', data: [...] }
+}
 module.exports = {
   AiFastApiError,
   indexPdf,
   generateFlashcards,
   generateQuiz,
   generateQa,
+  checkTaskStatus,
 };
