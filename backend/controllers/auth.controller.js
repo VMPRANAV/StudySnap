@@ -149,3 +149,22 @@ exports.warmAi = async (req, res) => {
     });
   }
 };
+
+exports.cronWarmAi = async (req, res) => {
+  try {
+    const result = await warmAiService();
+    res.status(200).json({
+      ok: true,
+      source: 'cron',
+      ai: result,
+      warmedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('AI cron warmup failed:', error);
+    res.status(503).json({
+      ok: false,
+      source: 'cron',
+      message: error.message || 'AI cron warmup failed.',
+    });
+  }
+};

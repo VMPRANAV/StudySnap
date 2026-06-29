@@ -1,0 +1,22 @@
+services:
+  - type: cron
+    name: studysnap-ai-direct-warm
+    runtime: node
+    schedule: "*/10 * * * *"
+    buildCommand: "true"
+    startCommand: 'curl -fsS "$AI_HEALTH_URL"'
+    envVars:
+      - key: AI_HEALTH_URL
+        sync: false
+
+  - type: cron
+    name: studysnap-ai-backend-warm
+    runtime: node
+    schedule: "5,15,25,35,45,55 * * * *"
+    buildCommand: "true"
+    startCommand: 'curl -fsS -H "x-cron-secret: $CRON_SECRET" "$BACKEND_WARMUP_URL"'
+    envVars:
+      - key: BACKEND_WARMUP_URL
+        sync: false
+      - key: CRON_SECRET
+        sync: false

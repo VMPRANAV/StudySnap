@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/user.model');
 
 const JWT_SECRET = process.env.JWT_SECRET;
+const CRON_SECRET = process.env.CRON_SECRET;
 
 /**
  * @desc      Middleware to protect routes by verifying JWT
@@ -60,4 +61,21 @@ exports.protect = async (req, res, next) => {
       message: 'Not authorized, token failed' 
     });
   }
+};
+
+exports.protectCron = (req, res, next) => {
+  if (!CRON_SECRET) {
+    return res.status(500).json({
+      message: 'CRON_SECRET is not configured',
+    });
+  }
+
+  const providedSecret = req.headers['x-cron-secret'];
+  if (!providedSecret || providedSecret !== CRON_SECRET) {
+    return res.status(401).json({
+      message: 'Invalid cron secret',
+    });
+  }
+
+  next();
 };

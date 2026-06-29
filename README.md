@@ -57,3 +57,43 @@ The repository is organized into three main directories:
 ├── frontend/   # React application source code
 ├── backend/    # Node.js/Express public API (JWT + persistence)
 └── ai-fastapi/  # FastAPI internal AI service (PDF+RAG+generation)
+
+## AI Keepalive Cron
+
+To keep the `ai-fastapi` service warm in production, configure a cron or uptime service to call:
+
+`GET /api/auth/ai-warmup/cron`
+
+Required header:
+
+`x-cron-secret: <CRON_SECRET>`
+
+Example target:
+
+`https://your-backend-service.onrender.com/api/auth/ai-warmup/cron`
+
+Recommended schedule:
+
+- Every 10 minutes
+
+Required backend env var:
+
+- `CRON_SECRET`
+
+### Render Blueprint
+
+This repo includes a `render.yaml` with two Render cron jobs:
+
+- `studysnap-ai-direct-warm`
+- `studysnap-ai-backend-warm`
+
+Set these cron-job env vars in Render when importing the blueprint:
+
+- `AI_HEALTH_URL=https://<your-ai-fastapi-service>.onrender.com/health`
+- `BACKEND_WARMUP_URL=https://<your-backend-service>.onrender.com/api/auth/ai-warmup/cron`
+- `CRON_SECRET=<same backend CRON_SECRET>`
+
+Recommended schedules:
+
+- Direct AI warmup: every 10 minutes
+- Backend warmup: every 10 minutes, offset by 5 minutes
