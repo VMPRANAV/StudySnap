@@ -200,22 +200,61 @@ const backend=import.meta.env.VITE_URL||'http://localhost:3000'
             }
             
             const newQuiz = await genRes.json();
-            
-            // Validate quiz structure
-            if (!newQuiz || !newQuiz.questions || !Array.isArray(newQuiz.questions)) {
-                throw new Error('Invalid quiz format received from server');
-            }
-            
-            // Step 3: Complete
+
+            const initiationData = await genRes.json();
+const quizId = initiationData._id; // Get the temporary MongoDB Document ID
+
+setStep('AI is crafting your questions (0%)...');
+setProgress(70);
+
+let attempts = 0;
+const maxAttempts = 30; // 2 minutes max ceiling
+
+const pollInterval = setInterval(async () => {
+    attempts++;
+    try {
+        const checkRes = await fetch(`${backendUrl}`, { headers });
+        if (handleAuthError(checkRes)) {
+            clearInterval(pollInterval);
+            return;
+        }
+        
+        const currentQuizzes = await checkRes.json();
+        const updatedQuiz = currentQuizzes.find(q => q._id === quizId);
+
+        if (updatedQuiz && updatedQuiz.status === 'completed') {
+            clearInterval(pollInterval);
             setStep('Quiz generated successfully!');
             setProgress(100);
-            
+
             setTimeout(() => {
-                setSavedQuizzes(prev => [newQuiz, ...prev]);
-                handleStartQuiz(newQuiz);
+                setSavedQuizzes(currentQuizzes);
+                handleStartQuiz(updatedQuiz);
                 setProgress(0);
                 setStep('');
+                setIsLoading(false);
             }, 1000);
+        } else if (updatedQuiz && updatedQuiz.status === 'failed') {
+            clearInterval(pollInterval);
+            setIsLoading(false);
+            setError(updatedQuiz.errorDetails || "AI failed to format this quiz data.");
+        } else if (attempts >= maxAttempts) {
+            clearInterval(pollInterval);
+            setIsLoading(false);
+            setError("Generation took too long. Check 'Saved Quizzes' in a few moments.");
+        } else {
+
+            setStep(`AI is writing your questions (${Math.min(70 + attempts * 2, 95)}%)...`);
+        }
+    } catch (pollErr) {
+        clearInterval(pollInterval);
+        setIsLoading(false);
+        setError("Lost connection to status server.");
+    }
+}, 4000);
+
+return; // Halt standard flow progression since interval loop takes control
+            
 
         } catch (err) {
             console.error('Quiz generation error:', err);
