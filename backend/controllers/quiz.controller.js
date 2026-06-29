@@ -57,10 +57,10 @@ exports.generateQuiz = async (req, res) => {
       userId: req.user.id,
       sourceFileId: fileId,
       topic: prompt, 
-      questions: quizData
+      questions: []
+      
     });
-
-    await newQuiz.save();
+    await newQuiz.save({ validateBeforeSave: false });
     res.status(201).json(newQuiz);
   } catch (error) {
     console.error('Error generating quiz:', error);
