@@ -43,6 +43,12 @@ app.use('/api/qa',qaRoutes);
 app.get('/', (req, res) => {
   res.status(200).send('Personalized AI Educator Backend is running successfully!');
 });
+
+// Lightweight health endpoint used by the keep-alive pinger (and external monitors).
+app.get('/health', (req, res) => {
+  res.status(200).json({ ok: true });
+});
+
 app.use((req, res) => {
   // Adjust the path to your built frontend index.html
   res.sendFile(path.join(__dirname, '../frontend/build/index.html'));
@@ -51,25 +57,46 @@ app.use((req, res) => {
 // --- Keep-alive pinger to prevent Render free-tier cold starts ---
 // Render spins down idle services after ~15 minutes. When both backend and
 // FastAPI wake up simultaneously, all queued requests hit Groq at once → 429s.
-// Pinging every 14 minutes keeps both services warm and eliminates the problem.
+// Pinging every 14 minutes keeps BOTH services warm and eliminates the problem.
+//
+// Required env vars (production only):
+//   FASTAPI_AI_URL  – your FastAPI Render URL  (e.g. https://studysnap-ai.onrender.com)
+//   BACKEND_URL     – this backend's Render URL (e.g. https://studysnap-api.onrender.com)
 const KEEP_ALIVE_INTERVAL_MS = 14 * 60 * 1000; // 14 minutes
+
+async function pingUrl(label, url) {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    console.log(`[KeepAlive] ${label} ping → ${res.status}`);
+  } catch (err) {
+    console.warn(`[KeepAlive] ${label} ping failed: ${err.message}`);
+  }
+}
 
 function startKeepAlivePinger() {
   if (process.env.NODE_ENV !== 'production') return;
-  const fastApiUrl = process.env.FASTAPI_AI_URL;
-  if (!fastApiUrl) return;
 
-  const pingUrl = new URL('/health', fastApiUrl).toString();
-  setInterval(async () => {
-    try {
-      const res = await fetch(pingUrl, { signal: AbortSignal.timeout(10_000) });
-      console.log(`[KeepAlive] FastAPI ping → ${res.status}`);
-    } catch (err) {
-      console.warn(`[KeepAlive] FastAPI ping failed: ${err.message}`);
-    }
+  const targets = [];
+
+  if (process.env.FASTAPI_AI_URL) {
+    targets.push({ label: 'FastAPI', url: new URL('/health', process.env.FASTAPI_AI_URL).toString() });
+  }
+
+  if (process.env.BACKEND_URL) {
+    targets.push({ label: 'Backend (self)', url: new URL('/health', process.env.BACKEND_URL).toString() });
+  }
+
+  if (targets.length === 0) {
+    console.warn('[KeepAlive] No FASTAPI_AI_URL or BACKEND_URL set — keep-alive disabled.');
+    return;
+  }
+
+  setInterval(() => {
+    targets.forEach(({ label, url }) => pingUrl(label, url));
   }, KEEP_ALIVE_INTERVAL_MS);
 
-  console.log(`[KeepAlive] Pinging FastAPI every ${KEEP_ALIVE_INTERVAL_MS / 60000} min to prevent cold starts`);
+  const names = targets.map(t => t.label).join(' + ');
+  console.log(`[KeepAlive] Pinging [${names}] every ${KEEP_ALIVE_INTERVAL_MS / 60000} min to prevent cold starts`);
 }
 
 mongoose.connect(process.env.MONGODB_URI)
