@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/user.model');
+const { warmAiService } = require('../services/aiFastApi.client');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -111,6 +112,10 @@ exports.login = async (req, res) => {
     );
 
     // 5. Send response
+    warmAiService().catch((error) => {
+      console.error('AI service warmup after login failed:', error.message);
+    });
+
     res.status(200).json({
       status: 'success',
       message: 'Login successful!',
@@ -127,4 +132,3 @@ exports.login = async (req, res) => {
     res.status(500).json({ message: 'Server error during login.' });
   }
 };
-

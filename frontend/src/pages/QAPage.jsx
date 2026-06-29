@@ -230,38 +230,37 @@ const QaPage = ({ isSidebarOpen }) => {
             setError("Authentication required. Please log in again.");
             return;
         }
-        
+
+        let startedPolling = false;
         setIsLoading(true);
         setError(null);
         setProgress(0);
-        
+
         try {
-            // Step 1: Upload PDF (using '/upload' route from qa.routes.js)
             setStep('Uploading PDF document...');
             setProgress(25);
-            
+
             const formData = new FormData();
             formData.append('file', pdfFile);
-            
-            const uploadRes = await fetch(`${backendUrl}/upload`, { 
-                method: 'POST', 
+
+            const uploadRes = await fetch(`${backendUrl}/upload`, {
+                method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` },
-                body: formData 
+                body: formData
             });
-            
+
             if (handleAuthError(uploadRes)) return;
             if (!uploadRes.ok) {
                 const errData = await uploadRes.json();
                 throw new Error(`PDF upload failed: ${errData.message}`);
             }
-            
+
             const uploadData = await uploadRes.json();
             const { fileId } = uploadData;
 
-            // Step 2: Generate Q&A Set (using '/generate' route)
             setStep('Generating Q&A set with AI...');
             setProgress(65);
-            
+
             const headers = getAuthHeaders();
             const payload = { fileId, prompt, marksDistribution: marks };
 
@@ -270,71 +269,73 @@ const QaPage = ({ isSidebarOpen }) => {
                 headers,
                 body: JSON.stringify(payload),
             });
-            
+
             if (handleAuthError(genRes)) return;
             if (!genRes.ok) {
                 const errData = await genRes.json();
                 throw new Error(`Q&A generation failed: ${errData.message}`);
             }
+
             const initiationData = await genRes.json();
-const qaId = initiationData._id;
+            const qaId = initiationData._id;
 
-setStep('AI is compiling comprehensive answers (0%)...');
-setProgress(70);
+            setStep(initiationData.progressMessage || 'Preparing Q&A generation...');
+            setProgress(initiationData.progress || 5);
 
-let attempts = 0;
-const maxAttempts = 35; // Extra padding for deep processing on 14-mark variants
+            let attempts = 0;
+            const maxAttempts = 35;
+            startedPolling = true;
 
-const pollInterval = setInterval(async () => {
-    attempts++;
-    try {
-        const checkRes = await fetch(backendUrl, { headers: getAuthHeaders() });
-        if (handleAuthError(checkRes)) {
-            clearInterval(pollInterval);
+            const pollInterval = setInterval(async () => {
+                attempts++;
+                try {
+                    const checkRes = await fetch(`${backendUrl}/${qaId}`, { headers: getAuthHeaders() });
+                    if (handleAuthError(checkRes)) {
+                        clearInterval(pollInterval);
+                        setIsLoading(false);
+                        return;
+                    }
+
+                    const updatedSet = await checkRes.json();
+                    setProgress(typeof updatedSet.progress === 'number' ? updatedSet.progress : 0);
+                    setStep(updatedSet.progressMessage || 'Generating Q&A set...');
+
+                    if (updatedSet.status === 'completed') {
+                        clearInterval(pollInterval);
+                        setStep('Q&A set generated successfully!');
+                        setProgress(100);
+
+                        setTimeout(() => {
+                            setSavedQaSets(prev => [updatedSet, ...prev.filter(set => set._id !== updatedSet._id)]);
+                            handleStartReview(updatedSet);
+                            setProgress(0);
+                            setStep('');
+                            setIsLoading(false);
+                        }, 1000);
+                    } else if (updatedSet.status === 'failed') {
+                        clearInterval(pollInterval);
+                        setIsLoading(false);
+                        setError(updatedSet.errorDetails || "AI failed to build this exam layout.");
+                    } else if (attempts >= maxAttempts) {
+                        clearInterval(pollInterval);
+                        setIsLoading(false);
+                        setError("The operation timed out. Please try a simpler mark allocation distribution.");
+                    }
+                } catch (pollErr) {
+                    clearInterval(pollInterval);
+                    setIsLoading(false);
+                    setError("Network error evaluating task lifecycle updates.");
+                }
+            }, 4000);
+
             return;
-        }
-        
-        const currentSets = await checkRes.json();
-        const updatedSet = currentSets.find(s => s._id === qaId);
-
-        if (updatedSet && updatedSet.status === 'completed') {
-            clearInterval(pollInterval);
-            setStep('Q&A set generated successfully!');
-            setProgress(100);
-
-            setTimeout(() => {
-                setSavedQaSets(currentSets);
-                handleStartReview(updatedSet);
-                setProgress(0);
-                setStep('');
-                setIsLoading(false);
-            }, 1000);
-        } else if (updatedSet && updatedSet.status === 'failed') {
-            clearInterval(pollInterval);
-            setIsLoading(false);
-            setError(updatedSet.errorDetails || "AI failed to build this exam layout.");
-        } else if (attempts >= maxAttempts) {
-            clearInterval(pollInterval);
-            setIsLoading(false);
-            setError("The operation timed out. Please try a simpler mark allocation distribution.");
-        } else {
-            setStep(`AI is drafting test items (${Math.min(70 + attempts * 2, 95)}%)...`);
-        }
-    } catch (pollErr) {
-        clearInterval(pollInterval);
-        setIsLoading(false);
-        setError("Network error evaluating task lifecycle updates.");
-    }
-}, 4000);
-
-return;
-            
-
         } catch (err) {
             console.error('Q&A generation error:', err);
             setError(err.message || "An unexpected error occurred.");
         } finally {
-            setIsLoading(false);
+            if (!startedPolling) {
+                setIsLoading(false);
+            }
         }
     };
 

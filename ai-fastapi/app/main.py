@@ -33,6 +33,12 @@ class GenerateQaRequest(GenerateRequest):
 BACKGROUND_TASKS_STORE = {}
 
 
+def set_task_state(task_id: str, **updates):
+    current = BACKGROUND_TASKS_STORE.get(task_id, {})
+    current.update(updates)
+    BACKGROUND_TASKS_STORE[task_id] = current
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     timeout = httpx.Timeout(SETTINGS.http_timeout_s)
@@ -47,24 +53,55 @@ app = FastAPI(title="StudySnap AI Service", lifespan=lifespan)
 # --- Core Worker Wrappers ---
 async def flashcards_worker(task_id: str, http_client, user_id, file_id, prompt):
     try:
-        data = await generate_flashcards(http_client, user_id=user_id, file_id=file_id, prompt=prompt)
-        BACKGROUND_TASKS_STORE[task_id] = {"status": "completed", "data": data, "error": None}
+        async def progress(percent: int, message: str):
+            set_task_state(task_id, status="processing", progress=percent, message=message, error=None)
+
+        await progress(10, "Queued flashcard generation")
+        data = await generate_flashcards(
+            http_client,
+            user_id=user_id,
+            file_id=file_id,
+            prompt=prompt,
+            progress_callback=progress,
+        )
+        set_task_state(task_id, status="completed", progress=100, message="Flashcards generated", data=data, error=None)
     except Exception as e:
-        BACKGROUND_TASKS_STORE[task_id] = {"status": "failed", "data": None, "error": str(e)}
+        set_task_state(task_id, status="failed", progress=100, message="Flashcard generation failed", data=None, error=str(e))
 
 async def quiz_worker(task_id: str, http_client, user_id, file_id, prompt):
     try:
-        data = await generate_quiz(http_client, user_id=user_id, file_id=file_id, prompt=prompt)
-        BACKGROUND_TASKS_STORE[task_id] = {"status": "completed", "data": data, "error": None}
+        async def progress(percent: int, message: str):
+            set_task_state(task_id, status="processing", progress=percent, message=message, error=None)
+
+        await progress(10, "Queued quiz generation")
+        data = await generate_quiz(
+            http_client,
+            user_id=user_id,
+            file_id=file_id,
+            prompt=prompt,
+            progress_callback=progress,
+        )
+        set_task_state(task_id, status="completed", progress=100, message="Quiz generated", data=data, error=None)
     except Exception as e:
-        BACKGROUND_TASKS_STORE[task_id] = {"status": "failed", "data": None, "error": str(e)}
+        set_task_state(task_id, status="failed", progress=100, message="Quiz generation failed", data=None, error=str(e))
 
 async def qa_worker(task_id: str, http_client, user_id, file_id, prompt, marks_distribution):
     try:
-        data = await generate_qa(http_client, user_id=user_id, file_id=file_id, prompt=prompt, marks_distribution=marks_distribution)
-        BACKGROUND_TASKS_STORE[task_id] = {"status": "completed", "data": data, "error": None}
+        async def progress(percent: int, message: str):
+            set_task_state(task_id, status="processing", progress=percent, message=message, error=None)
+
+        await progress(10, "Queued Q&A generation")
+        data = await generate_qa(
+            http_client,
+            user_id=user_id,
+            file_id=file_id,
+            prompt=prompt,
+            marks_distribution=marks_distribution,
+            progress_callback=progress,
+        )
+        set_task_state(task_id, status="completed", progress=100, message="Q&A set generated", data=data, error=None)
     except Exception as e:
-        BACKGROUND_TASKS_STORE[task_id] = {"status": "failed", "data": None, "error": str(e)}
+        set_task_state(task_id, status="failed", progress=100, message="Q&A generation failed", data=None, error=str(e))
 
 
 @app.get("/health")
@@ -119,7 +156,7 @@ async def internal_generate_flashcards(req: GenerateRequest, background_tasks: B
     try:
         user_oid = ObjectId(req.user_id)
         task_id = str(uuid.uuid4())
-        BACKGROUND_TASKS_STORE[task_id] = {"status": "processing", "data": None, "error": None}
+        BACKGROUND_TASKS_STORE[task_id] = {"status": "processing", "progress": 5, "message": "Preparing flashcard generation", "data": None, "error": None}
         
         # Dispatch to background tasks instantly
         background_tasks.add_task(flashcards_worker, task_id, app.state.http, user_oid, req.file_id, req.prompt)
@@ -134,7 +171,7 @@ async def internal_generate_quiz(req: GenerateRequest, background_tasks: Backgro
     try:
         user_oid = ObjectId(req.user_id)
         task_id = str(uuid.uuid4())
-        BACKGROUND_TASKS_STORE[task_id] = {"status": "processing", "data": None, "error": None}
+        BACKGROUND_TASKS_STORE[task_id] = {"status": "processing", "progress": 5, "message": "Preparing quiz generation", "data": None, "error": None}
         
         background_tasks.add_task(quiz_worker, task_id, app.state.http, user_oid, req.file_id, req.prompt)
         
@@ -151,7 +188,7 @@ async def internal_generate_qa(req: GenerateQaRequest, background_tasks: Backgro
             raise HTTPException(status_code=400, detail="marksDistribution must be a non-empty object")
         
         task_id = str(uuid.uuid4())
-        BACKGROUND_TASKS_STORE[task_id] = {"status": "processing", "data": None, "error": None}
+        BACKGROUND_TASKS_STORE[task_id] = {"status": "processing", "progress": 5, "message": "Preparing Q&A generation", "data": None, "error": None}
         
         background_tasks.add_task(qa_worker, task_id, app.state.http, user_oid, req.file_id, req.prompt, req.marksDistribution)
         

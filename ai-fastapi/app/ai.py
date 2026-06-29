@@ -12,6 +12,8 @@ from .providers.gemini_embeddings import embed_text
 from .providers.groq_chat import chat_completion
 from .text_utils import chunk_text, clean_ai_json_text
 
+ProgressCallback = callable
+
 
 def _parse_ai_json(text: str):
     if text is None:
@@ -119,10 +121,8 @@ async def index_pdf(
     )
     await delete_chunks(user_id, file_id)
 
-    # --- ADDED: Rate Throttling Semaphore ---
-    # Limits maximum concurrent connections to Google's API to 10-20 at a time.
-    # This keeps things extremely fast but avoids triggering a 429 Too Many Requests error.
-    semaphore = asyncio.Semaphore(15)
+    # Keep provider concurrency modest in production to avoid embedding 429s.
+    semaphore = asyncio.Semaphore(max(1, SETTINGS.embedding_concurrency))
 
     async def throttled_embed(chunk: str):
         async with semaphore:
@@ -201,11 +201,16 @@ async def generate_flashcards(
     user_id: ObjectId,
     file_id: str,
     prompt: str,
+    progress_callback=None,
 ):
+    if progress_callback:
+        await progress_callback(20, "Finding relevant sections in your document")
     context = await _retrieve_context(
         client, user_id=user_id, file_id=file_id, query=prompt, num_candidates=100, limit=5
     )
 
+    if progress_callback:
+        await progress_callback(55, "Generating flashcards from the document context")
     ai_prompt = f"""Based on the following document context, generate flashcards.
 Context:
 {context}
@@ -218,6 +223,8 @@ Return ONLY a valid JSON array: [{{"question": "...", "answer": "..."}}]"""
 
     content = await chat_completion(client, prompt=ai_prompt, temperature=0.8)
     print(f"[AI][generate_flashcards] raw_response_preview={content[:300]!r}")
+    if progress_callback:
+        await progress_callback(85, "Validating generated flashcards")
     data = _parse_ai_json(content)
     data = _ensure_list_payload(data, preferred_keys=["flashcards", "cards", "items"], label="Flashcards")
         
@@ -238,12 +245,17 @@ async def generate_quiz(
     user_id: ObjectId,
     file_id: str,
     prompt: str,
+    progress_callback=None,
 ):
+    if progress_callback:
+        await progress_callback(20, "Finding relevant sections in your document")
     context = await _retrieve_context(
         client, user_id=user_id, file_id=file_id, query=prompt, num_candidates=100, limit=5
     )
 
     desired = _infer_count(prompt) or 5
+    if progress_callback:
+        await progress_callback(55, "Generating quiz questions from the document context")
     ai_prompt = f"""You are an expert educator. 
 Context from Study Document:
 {context}
@@ -261,10 +273,14 @@ Requirements:
     content = await chat_completion(client, prompt=ai_prompt, temperature=0.8)
     print(f"[AI][generate_quiz] raw_response_preview={content[:300]!r}")
     try:
+        if progress_callback:
+            await progress_callback(85, "Validating generated quiz questions")
         data = _parse_ai_json(content)
         return _validate_quiz_payload(data, desired=desired)
     except Exception as first_error:
         # Retry once with deterministic settings when the model returns non-JSON text.
+        if progress_callback:
+            await progress_callback(75, "Retrying quiz formatting for a clean result")
         retry_prompt = f"""Return ONLY valid JSON.
 Generate exactly {desired} MCQ(s) from the context.
 Output schema: [{{"questionText":"...","options":["...","...","...","..."],"correctAnswerIndex":0}}]
@@ -282,6 +298,8 @@ User Request:
         retry_content = await chat_completion(client, prompt=retry_prompt, temperature=0.2)
         print(f"[AI][generate_quiz] retry_response_preview={retry_content[:300]!r}")
         try:
+            if progress_callback:
+                await progress_callback(90, "Validating generated quiz questions")
             retry_data = _parse_ai_json(retry_content)
             return _validate_quiz_payload(retry_data, desired=desired)
         except Exception as retry_error:
@@ -297,9 +315,12 @@ async def generate_qa(
     file_id: str,
     prompt: str,
     marks_distribution: dict,
+    progress_callback=None,
 ):
     # FIX: Lower context retrieval limits from 8 down to 5 to mitigate upstream 
     # prompt token delays and safely resolve Render's 30-second request abort dropouts.
+    if progress_callback:
+        await progress_callback(20, "Finding relevant sections in your document")
     context = await _retrieve_context(
         client, user_id=user_id, file_id=file_id, query=prompt, num_candidates=150, limit=5
     )
@@ -324,6 +345,8 @@ Formatting:
 
     content = await chat_completion(client, prompt=ai_prompt, temperature=0.7, max_tokens=4096)
     print(f"[AI][generate_qa] raw_response_preview={content[:300]!r}")
+    if progress_callback:
+        await progress_callback(85, "Validating generated questions and answers")
     data = _parse_ai_json(content)
     data = _ensure_list_payload(data, preferred_keys=["questions", "qa", "items"], label="Q&A")
         

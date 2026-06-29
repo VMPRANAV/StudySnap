@@ -1,13 +1,15 @@
 const QaSet = require('../models/qaSet.model');
 const PDFDocument = require('pdfkit');
 const { AiFastApiError, indexPdf, generateQa } = require('../services/aiFastApi.client');
+const { syncGenerationDoc, syncGenerationCollection } = require('../services/generationProgress.service');
 
 function mapAiError(err) {
   if (err instanceof AiFastApiError) {
-    if (err.code === 'CONFIG') return { status: 500, message: err.message };
-    if (err.code === 'TIMEOUT') return { status: 504, message: err.message };
-    if (err.code === 'UNREACHABLE') return { status: 503, message: err.message };
-    return { status: 502, message: err.message };
+    if (err.code === 'CONFIG') return { status: 500, message: err.message, code: err.code, details: err.details };
+    if (err.code === 'TIMEOUT') return { status: 504, message: err.message, code: err.code, details: err.details };
+    if (err.code === 'UNREACHABLE') return { status: 503, message: err.message, code: err.code, details: err.details };
+    if (err.code === 'AI_SERVICE_RATE_LIMIT') return { status: 429, message: err.message, code: err.code, details: err.details, upstreamStatus: err.status };
+    return { status: 502, message: err.message, code: err.code, details: err.details, upstreamStatus: err.status };
   }
   return { status: 503, message: 'AI service unreachable' };
 }
@@ -30,7 +32,12 @@ res.status(200).json({ fileId, chunkCount, message: "Ready for Q&A generation" }
   } catch (error) {
     console.error('Error processing PDF for Q&A:', error);
     const mapped = mapAiError(error);
-    res.status(mapped.status).json({ message: mapped.message });
+    res.status(mapped.status).json({
+      message: mapped.message,
+      code: mapped.code,
+      upstreamStatus: mapped.upstreamStatus,
+      details: mapped.details,
+    });
   }
 };
 
@@ -53,23 +60,22 @@ exports.generateQaSet = async (req, res) => {
 
 
     // Generate Q&A data using the AI service
-    const qaData = await generateQa({
+    const taskInfo = await generateQa({
       userId: req.user.id,
       fileId,
       prompt,
       marksDistribution,
     });
-    
-    if (!qaData || !Array.isArray(qaData) || qaData.length === 0) {
-      throw new Error('AI service returned invalid or empty Q&A data');
-    }
 
     // Create a new Q&A Set document
     const newQaSet = new QaSet({ 
       userId: req.user.id,
       sourceFileId: fileId,
       topic: prompt, 
-      questions: []
+      questions: [],
+      taskId: taskInfo.taskId,
+      progress: 5,
+      progressMessage: taskInfo.message || 'Preparing Q&A generation',
     });
 
     await newQaSet.save({ validateBeforeSave: false });
@@ -82,7 +88,13 @@ exports.generateQaSet = async (req, res) => {
       stack: error.stack,
     });
     const mapped = mapAiError(error);
-    res.status(mapped.status).json({ message: mapped.message, error: error.message });
+    res.status(mapped.status).json({
+      message: mapped.message,
+      error: error.message,
+      code: mapped.code,
+      upstreamStatus: mapped.upstreamStatus,
+      details: mapped.details,
+    });
   }
 };
 
@@ -93,10 +105,26 @@ exports.getQaSets = async (req, res) => {
     }
 
     const sets = await QaSet.find({ userId: req.user.id }).sort({ createdAt: -1 });
+    await syncGenerationCollection(sets, { documentField: 'questions' });
     res.status(200).json(sets);
   } catch (error) {
     console.error('Error fetching Q&A sets:', error);
     res.status(500).json({ message: 'Failed to fetch Q&A sets.' });
+  }
+};
+
+exports.getQaSetById = async (req, res) => {
+  try {
+    const qaSet = await QaSet.findOne({ _id: req.params.id, userId: req.user.id });
+    if (!qaSet) {
+      return res.status(404).json({ message: 'Q&A set not found.' });
+    }
+
+    await syncGenerationDoc(qaSet, { documentField: 'questions' });
+    res.status(200).json(qaSet);
+  } catch (error) {
+    console.error('Error fetching Q&A set:', error);
+    res.status(500).json({ message: 'Failed to fetch Q&A set.' });
   }
 };
 

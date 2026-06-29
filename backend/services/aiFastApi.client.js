@@ -147,6 +147,13 @@ function mapFastApiFailure(res, body) {
       }
     );
   }
+  if (res.status === 429) {
+    return new AiFastApiError(detail || 'AI service rate limit exceeded', {
+      status: res.status,
+      code: 'AI_SERVICE_RATE_LIMIT',
+      details: body,
+    });
+  }
   if (res.status >= 500) {
     return new AiFastApiError(detail || 'AI service failed to process request', {
       status: res.status,
@@ -177,6 +184,23 @@ async function postJson(path, payload) {
     const body = await readErrorBody(res);
     throw mapFastApiFailure(res, body);
   }
+  return await res.json();
+}
+
+async function getJson(path, { includeInternalToken = false } = {}) {
+  assertConfigured();
+  const url = new URL(path, FASTAPI_AI_URL).toString();
+  const headers = includeInternalToken ? { 'X-AI-Internal-Token': AI_INTERNAL_TOKEN } : {};
+  const res = await fetchWithTimeout(url, {
+    method: 'GET',
+    headers,
+  });
+
+  if (!res.ok) {
+    const body = await readErrorBody(res);
+    throw mapFastApiFailure(res, body);
+  }
+
   return await res.json();
 }
 
@@ -234,21 +258,11 @@ async function generateQa({ userId, fileId, prompt, marksDistribution }) {
   });
 }
 async function checkTaskStatus(taskId) {
-  assertConfigured();
-  const url = new URL(`/internal/tasks/status/${taskId}`, FASTAPI_AI_URL).toString();
-  
-  const res = await fetchWithTimeout(url, {
-    method: 'GET',
-    headers: {
-      'X-AI-Internal-Token': AI_INTERNAL_TOKEN,
-    },
-  });
+  return await getJson(`/internal/tasks/status/${taskId}`, { includeInternalToken: true });
+}
 
-  if (!res.ok) {
-    const body = await readErrorBody(res);
-    throw mapFastApiFailure(res, body);
-  }
-  return await res.json(); // Expected return format: { status: 'completed'|'processing'|'failed', data: [...] }
+async function warmAiService() {
+  return await getJson('/health');
 }
 module.exports = {
   AiFastApiError,
@@ -257,4 +271,5 @@ module.exports = {
   generateQuiz,
   generateQa,
   checkTaskStatus,
+  warmAiService,
 };

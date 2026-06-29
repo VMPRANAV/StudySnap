@@ -47,6 +47,16 @@ const quizSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  progress: {
+    type: Number,
+    min: 0,
+    max: 100,
+    default: 0,
+  },
+  progressMessage: {
+    type: String,
+    trim: true,
+  },
   errorDetails: {
     type: String,
     trim: true

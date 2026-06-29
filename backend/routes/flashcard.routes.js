@@ -19,5 +19,6 @@ router.post('/generate',protect, flashcardController.generateFlashcards);
 
 // Route to get all saved flashcard sets
 router.get('/',protect, flashcardController.getFlashcardSets);
+router.get('/:id', protect, flashcardController.getFlashcardSetById);
 
 module.exports = router;

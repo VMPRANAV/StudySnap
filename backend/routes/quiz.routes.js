@@ -17,6 +17,7 @@ router.post('/generate', protect,quizController.generateQuiz);
 
 // Route to get all saved quizzes
 router.get('/', protect,quizController.getQuizzes);
+router.get('/:quizId', protect, quizController.getQuizById);
 
 // (Future route) Route to handle a user submitting their answers for a quiz
 router.post('/:quizId/submit',protect, quizController.submitQuizAttempt);

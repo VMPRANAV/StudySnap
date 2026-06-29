@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import httpx
 
 from ..config import SETTINGS
@@ -25,9 +26,33 @@ async def embed_text(client: httpx.AsyncClient, text: str) -> list[float]:
     if SETTINGS.embedding_dimensions:
         body["outputDimensionality"] = SETTINGS.embedding_dimensions
 
-    res = await client.post(url, params={"key": SETTINGS.gemini_api_key}, json=body)
-    res.raise_for_status()
-    data = res.json()
+    retries = max(0, SETTINGS.embedding_max_retries)
+    base_delay_s = max(0, SETTINGS.embedding_retry_base_ms) / 1000
+    data = None
+
+    for attempt in range(retries + 1):
+        res = await client.post(url, params={"key": SETTINGS.gemini_api_key}, json=body)
+        if res.status_code not in (429, 500, 502, 503, 504):
+            res.raise_for_status()
+            data = res.json()
+            break
+
+        if attempt >= retries:
+            res.raise_for_status()
+
+        retry_after = res.headers.get("retry-after")
+        if retry_after:
+            try:
+                delay_s = max(float(retry_after), base_delay_s)
+            except ValueError:
+                delay_s = base_delay_s * (2 ** attempt)
+        else:
+            delay_s = base_delay_s * (2 ** attempt)
+
+        await asyncio.sleep(delay_s)
+
+    if data is None:
+        raise RuntimeError("Gemini embedding request failed without a response payload")
 
     embedding_obj = data.get("embedding")
     values = None
@@ -48,4 +73,3 @@ async def embed_text(client: httpx.AsyncClient, text: str) -> list[float]:
         )
 
     return [float(v) for v in values]
-

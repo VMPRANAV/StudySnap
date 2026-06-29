@@ -1,13 +1,15 @@
 const Quiz = require('../models/quiz.model');
 const QuizService = require('../services/quiz.service');
 const { AiFastApiError, indexPdf, generateQuiz } = require('../services/aiFastApi.client');
+const { syncGenerationDoc, syncGenerationCollection } = require('../services/generationProgress.service');
 
 function mapAiError(err) {
   if (err instanceof AiFastApiError) {
-    if (err.code === 'CONFIG') return { status: 500, message: err.message };
-    if (err.code === 'TIMEOUT') return { status: 504, message: err.message };
-    if (err.code === 'UNREACHABLE') return { status: 503, message: err.message };
-    return { status: 502, message: err.message };
+    if (err.code === 'CONFIG') return { status: 500, message: err.message, code: err.code, details: err.details };
+    if (err.code === 'TIMEOUT') return { status: 504, message: err.message, code: err.code, details: err.details };
+    if (err.code === 'UNREACHABLE') return { status: 503, message: err.message, code: err.code, details: err.details };
+    if (err.code === 'AI_SERVICE_RATE_LIMIT') return { status: 429, message: err.message, code: err.code, details: err.details, upstreamStatus: err.status };
+    return { status: 502, message: err.message, code: err.code, details: err.details, upstreamStatus: err.status };
   }
   return { status: 503, message: 'AI service unreachable' };
 }
@@ -33,7 +35,12 @@ exports.processPdfForQuiz = async (req, res) => {
   } catch (error) {
     console.error('Error processing PDF for quiz:', error);
     const mapped = mapAiError(error);
-    res.status(mapped.status).json({ message: mapped.message });
+    res.status(mapped.status).json({
+      message: mapped.message,
+      code: mapped.code,
+      upstreamStatus: mapped.upstreamStatus,
+      details: mapped.details,
+    });
   }
 };
 
@@ -47,7 +54,7 @@ exports.generateQuiz = async (req, res) => {
     });
 
     const { fileId, prompt } = req.body;
-    const quizData = await generateQuiz({
+    const taskInfo = await generateQuiz({
       userId: req.user.id,
       fileId,
       prompt,
@@ -57,7 +64,10 @@ exports.generateQuiz = async (req, res) => {
       userId: req.user.id,
       sourceFileId: fileId,
       topic: prompt, 
-      questions: []
+      questions: [],
+      taskId: taskInfo.taskId,
+      progress: 5,
+      progressMessage: taskInfo.message || 'Preparing quiz generation',
       
     });
     await newQuiz.save({ validateBeforeSave: false });
@@ -65,7 +75,13 @@ exports.generateQuiz = async (req, res) => {
   } catch (error) {
     console.error('Error generating quiz:', error);
     const mapped = mapAiError(error);
-    res.status(mapped.status).json({ message: mapped.message, error: error.message });
+    res.status(mapped.status).json({
+      message: mapped.message,
+      error: error.message,
+      code: mapped.code,
+      upstreamStatus: mapped.upstreamStatus,
+      details: mapped.details,
+    });
   }
     
 };
@@ -83,10 +99,26 @@ exports.getQuizzes = async (req, res) => {
       .sort({ createdAt: -1 })
       .populate('userId', 'username email');
 
+    await syncGenerationCollection(quizzes, { documentField: 'questions' });
     res.status(200).json(quizzes);
   } catch (error) {
     console.error('Error fetching quizzes:', error);
     res.status(500).json({ message: 'Failed to fetch quizzes.' });
+  }
+};
+
+exports.getQuizById = async (req, res) => {
+  try {
+    const quiz = await Quiz.findOne({ _id: req.params.quizId, userId: req.user.id });
+    if (!quiz) {
+      return res.status(404).json({ message: 'Quiz not found.' });
+    }
+
+    await syncGenerationDoc(quiz, { documentField: 'questions' });
+    res.status(200).json(quiz);
+  } catch (error) {
+    console.error('Error fetching quiz:', error);
+    res.status(500).json({ message: 'Failed to fetch quiz.' });
   }
 };
 

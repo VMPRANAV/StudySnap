@@ -1,12 +1,14 @@
 const FlashcardSet = require('../models/flashcardSet.model');
 const { AiFastApiError, indexPdf, generateFlashcards } = require('../services/aiFastApi.client');
+const { syncGenerationDoc, syncGenerationCollection } = require('../services/generationProgress.service');
 
 function mapAiError(err) {
   if (err instanceof AiFastApiError) {
-    if (err.code === 'CONFIG') return { status: 500, message: err.message };
-    if (err.code === 'TIMEOUT') return { status: 504, message: err.message };
-    if (err.code === 'UNREACHABLE') return { status: 503, message: err.message };
-    return { status: 502, message: err.message };
+    if (err.code === 'CONFIG') return { status: 500, message: err.message, code: err.code, details: err.details };
+    if (err.code === 'TIMEOUT') return { status: 504, message: err.message, code: err.code, details: err.details };
+    if (err.code === 'UNREACHABLE') return { status: 503, message: err.message, code: err.code, details: err.details };
+    if (err.code === 'AI_SERVICE_RATE_LIMIT') return { status: 429, message: err.message, code: err.code, details: err.details, upstreamStatus: err.status };
+    return { status: 502, message: err.message, code: err.code, details: err.details, upstreamStatus: err.status };
   }
   return { status: 503, message: 'AI service unreachable' };
 }
@@ -35,7 +37,12 @@ exports.processPdfForFlashcards = async (req, res) => {
   } catch (error) {
     console.error('Error processing PDF for flashcards:', error);
     const mapped = mapAiError(error);
-    res.status(mapped.status).json({ message: mapped.message });
+    res.status(mapped.status).json({
+      message: mapped.message,
+      code: mapped.code,
+      upstreamStatus: mapped.upstreamStatus,
+      details: mapped.details,
+    });
   }
 };
 
@@ -43,7 +50,7 @@ exports.generateFlashcards = async (req, res) => {
   try {
     const { fileId, prompt } = req.body;
 
-    const flashcards = await generateFlashcards({
+    const taskInfo = await generateFlashcards({
       userId: req.user.id,
       fileId,
       prompt,
@@ -53,7 +60,10 @@ exports.generateFlashcards = async (req, res) => {
       userId: req.user.id,
       sourceFileId: fileId,
       topic: prompt, 
-      flashcards: []
+      flashcards: [],
+      taskId: taskInfo.taskId,
+      progress: 5,
+      progressMessage: taskInfo.message || 'Preparing flashcard generation',
     });
 
     await newSet.save({ validateBeforeSave: false });
@@ -61,7 +71,13 @@ exports.generateFlashcards = async (req, res) => {
   } catch (error) {
     console.error('Error generating flashcards:', error);
     const mapped = mapAiError(error);
-    res.status(mapped.status).json({ message: mapped.message, error: error.message });
+    res.status(mapped.status).json({
+      message: mapped.message,
+      error: error.message,
+      code: mapped.code,
+      upstreamStatus: mapped.upstreamStatus,
+      details: mapped.details,
+    });
   }
 };
 
@@ -77,9 +93,25 @@ exports.getFlashcardSets = async (req, res) => {
       .sort({ createdAt: -1 })
       .populate('userId', 'username email');
 
+    await syncGenerationCollection(sets, { documentField: 'flashcards' });
     res.status(200).json(sets);
   } catch (error) {
     console.error('Error fetching flashcard sets:', error);
     res.status(500).json({ message: 'Failed to fetch flashcard sets.' });
+  }
+};
+
+exports.getFlashcardSetById = async (req, res) => {
+  try {
+    const set = await FlashcardSet.findOne({ _id: req.params.id, userId: req.user.id });
+    if (!set) {
+      return res.status(404).json({ message: 'Flashcard set not found.' });
+    }
+
+    await syncGenerationDoc(set, { documentField: 'flashcards' });
+    res.status(200).json(set);
+  } catch (error) {
+    console.error('Error fetching flashcard set:', error);
+    res.status(500).json({ message: 'Failed to fetch flashcard set.' });
   }
 };

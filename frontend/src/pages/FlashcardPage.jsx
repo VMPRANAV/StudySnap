@@ -214,32 +214,34 @@ const handleDragLeave = (e) => {
             return;
         }
 
+        let startedPolling = false;
+
         try {
             setIsLoading(true);
             setError(null);
             setUploadProgress(0);
-            
+
             setCurrentStep('Uploading PDF document...');
             setUploadProgress(25);
-            
+
             const formData = new FormData();
             formData.append('file', pdfFile);
-            
+
             const token = localStorage.getItem('token');
-            
-            const uploadRes = await fetch(`${backendUrl}/upload`, { 
-                method: 'POST', 
+
+            const uploadRes = await fetch(`${backendUrl}/upload`, {
+                method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`
                 },
-                body: formData 
+                body: formData
             });
-            
+
             if (handleAuthError(uploadRes)) {
                 setError('Session expired. Please login again.');
                 return;
             }
-            
+
             if (!uploadRes.ok) {
                 let errMsg = `Upload failed: ${uploadRes.status}`;
                 try {
@@ -250,10 +252,10 @@ const handleDragLeave = (e) => {
                 } catch {}
                 throw new Error(errMsg);
             }
-            
+
             setUploadProgress(50);
             setCurrentStep('Processing PDF content...');
-            
+
             const uploadData = await uploadRes.json();
             const fileId = uploadData.fileId;
             const chunkCount = uploadData.chunkCount ?? 0;
@@ -263,21 +265,19 @@ const handleDragLeave = (e) => {
             }
 
             setCurrentStep(`Indexed ${chunkCount} text chunks. Generating flashcards...`);
-            
             setUploadProgress(75);
-            
+
             const genRes = await fetch(`${backendUrl}/generate`, {
                 method: 'POST',
                 headers: getAuthHeaders(),
                 body: JSON.stringify({ fileId, prompt }),
             });
-            
+
             if (handleAuthError(genRes)) {
                 setError('Session expired. Please login again.');
                 return;
             }
-            
-            // --- Handle 413 or token limit error here ---
+
             if (genRes.status === 413) {
                 setError("The uploaded file is too large or contains too much text for the AI to process. Please try a smaller document or split your PDF.");
                 return;
@@ -287,7 +287,6 @@ const handleDragLeave = (e) => {
                 let errMsg = `Generation failed: ${genRes.status}`;
                 try {
                     const errData = await genRes.json();
-                    // If status is 413 or backend error message contains 413, show "too large" message
                     if (
                         genRes.status === 413 ||
                         (genRes.status === 500 && errData?.error && typeof errData.error === 'string' && errData.error.includes('413'))
@@ -302,68 +301,69 @@ const handleDragLeave = (e) => {
                 setError(errMsg);
                 return;
             }
-            // --- End error handling ---
-const initiationData = await genRes.json();
-const setId = initiationData._id;
 
-setCurrentStep('AI is writing definitions (0%)...');
-setUploadProgress(70);
+            const initiationData = await genRes.json();
+            const setId = initiationData._id;
 
-let attempts = 0;
-const maxAttempts = 30;
+            setCurrentStep(initiationData.progressMessage || 'Preparing flashcard generation...');
+            setUploadProgress(initiationData.progress || 5);
 
-const pollInterval = setInterval(async () => {
-    attempts++;
-    try {
-        const checkRes = await fetch(backendUrl, { headers: getAuthHeaders() });
-        if (handleAuthError(checkRes)) {
-            clearInterval(pollInterval);
+            let attempts = 0;
+            const maxAttempts = 30;
+            startedPolling = true;
+
+            const pollInterval = setInterval(async () => {
+                attempts++;
+                try {
+                    const checkRes = await fetch(`${backendUrl}/${setId}`, { headers: getAuthHeaders() });
+                    if (handleAuthError(checkRes)) {
+                        clearInterval(pollInterval);
+                        setIsLoading(false);
+                        return;
+                    }
+
+                    const updatedSet = await checkRes.json();
+                    setUploadProgress(typeof updatedSet.progress === 'number' ? updatedSet.progress : 0);
+                    setCurrentStep(updatedSet.progressMessage || 'Generating flashcards...');
+
+                    if (updatedSet.status === 'completed') {
+                        clearInterval(pollInterval);
+                        setCurrentStep('Flashcards generated successfully!');
+                        setUploadProgress(100);
+
+                        setTimeout(() => {
+                            setFlashcards(updatedSet.flashcards);
+                            setSavedSets(prev => [updatedSet, ...prev.filter(set => set._id !== updatedSet._id)]);
+                            setCurrentIndex(0);
+                            setView('viewer');
+                            setUploadProgress(0);
+                            setCurrentStep('');
+                            setIsLoading(false);
+                        }, 1000);
+                    } else if (updatedSet.status === 'failed') {
+                        clearInterval(pollInterval);
+                        setIsLoading(false);
+                        setError(updatedSet.errorDetails || "AI failed to format this dataset.");
+                    } else if (attempts >= maxAttempts) {
+                        clearInterval(pollInterval);
+                        setIsLoading(false);
+                        setError("Generation timed out. Check your collection list shortly.");
+                    }
+                } catch (pollErr) {
+                    clearInterval(pollInterval);
+                    setIsLoading(false);
+                    setError("Error pulling status verification data.");
+                }
+            }, 4000);
+
             return;
-        }
-        
-        const currentSets = await checkRes.json();
-        const updatedSet = currentSets.find(s => s._id === setId);
-
-        if (updatedSet && updatedSet.status === 'completed') {
-            clearInterval(pollInterval);
-            setCurrentStep('Flashcards generated successfully!');
-            setUploadProgress(100);
-
-            setTimeout(() => {
-                setFlashcards(updatedSet.flashcards);
-                setSavedSets(currentSets);
-                setCurrentIndex(0);
-                setView('viewer');
-                setUploadProgress(0);
-                setCurrentStep('');
-                setIsLoading(false);
-            }, 1000);
-        } else if (updatedSet && updatedSet.status === 'failed') {
-            clearInterval(pollInterval);
-            setIsLoading(false);
-            setError(updatedSet.errorDetails || "AI failed to format this dataset.");
-        } else if (attempts >= maxAttempts) {
-            clearInterval(pollInterval);
-            setIsLoading(false);
-            setError("Generation timed out. Check your collection list shortly.");
-        } else {
-            setCurrentStep(`AI is analyzing concepts (${Math.min(70 + attempts * 2, 95)}%)...`);
-        }
-    } catch (pollErr) {
-        clearInterval(pollInterval);
-        setIsLoading(false);
-        setError("Error pulling status verification data.");
-    }
-}, 4000);
-
-return;
-
-
         } catch (err) {
             console.error('Generation error:', err);
             setError(err.message || "Generation failed. Please try again.");
         } finally {
-            setIsLoading(false);
+            if (!startedPolling) {
+                setIsLoading(false);
+            }
         }
     };
 

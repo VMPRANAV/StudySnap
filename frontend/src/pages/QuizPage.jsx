@@ -145,35 +145,35 @@ const backend=import.meta.env.VITE_URL||'http://localhost:3000'
             setError("Authentication required. Please log in again.");
             return;
         }
-        
+
+        let startedPolling = false;
         setIsLoading(true);
         setError(null);
         setProgress(0);
         setStep('');
-        
+
         try {
-            // Step 1: Upload PDF
             setStep('Uploading PDF document...');
             setProgress(25);
-            
+
             const formData = new FormData();
             formData.append('file', pdfFile);
-            
-            const uploadRes = await fetch(`${backendUrl}/upload`, { 
-                method: 'POST', 
+
+            const uploadRes = await fetch(`${backendUrl}/upload`, {
+                method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`
                 },
-                body: formData 
+                body: formData
             });
-            
+
             if (handleAuthError(uploadRes)) return;
-            
+
             if (!uploadRes.ok) {
                 const errorText = await uploadRes.text();
                 throw new Error(`PDF upload failed: ${errorText}`);
             }
-            
+
             const uploadData = await uploadRes.json();
             const { fileId } = uploadData;
 
@@ -181,82 +181,76 @@ const backend=import.meta.env.VITE_URL||'http://localhost:3000'
                 throw new Error('No file ID received from server');
             }
 
-            // Step 2: Generate Quiz
             setStep('Generating quiz with AI...');
             setProgress(65);
-            
+
             const headers = getAuthHeaders();
             const genRes = await fetch(`${backendUrl}/generate`, {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({ fileId, prompt }),
             });
-            
+
             if (handleAuthError(genRes)) return;
-            
+
             if (!genRes.ok) {
                 const errorText = await genRes.text();
                 throw new Error(`Quiz generation failed: ${errorText}`);
             }
-            
-            const newQuiz = await genRes.json();
+
             const initiationData = await genRes.json();
-const quizId = initiationData._id; 
+            const quizId = initiationData._id;
 
-setStep('AI is crafting your questions (0%)...');
-setProgress(70);
+            setStep(initiationData.progressMessage || 'Preparing quiz generation...');
+            setProgress(initiationData.progress || 5);
 
-let attempts = 0;
-const maxAttempts = 30; 
+            let attempts = 0;
+            const maxAttempts = 30;
+            startedPolling = true;
 
-const pollInterval = setInterval(async () => {
-    attempts++;
-    try {
-        // FIXED: Explicitly target the individual quiz record ID endpoint
-        const checkRes = await fetch(`${backendUrl}/${quizId}`, { headers }); 
-        if (handleAuthError(checkRes)) {
-            clearInterval(pollInterval);
-            setIsLoading(false);
+            const pollInterval = setInterval(async () => {
+                attempts++;
+                try {
+                    const checkRes = await fetch(`${backendUrl}/${quizId}`, { headers });
+                    if (handleAuthError(checkRes)) {
+                        clearInterval(pollInterval);
+                        setIsLoading(false);
+                        return;
+                    }
+
+                    const updatedQuiz = await checkRes.json();
+                    setProgress(typeof updatedQuiz.progress === 'number' ? updatedQuiz.progress : 0);
+                    setStep(updatedQuiz.progressMessage || 'Generating quiz...');
+
+                    if (updatedQuiz.status === 'completed') {
+                        clearInterval(pollInterval);
+                        setStep('Quiz generated successfully!');
+                        setProgress(100);
+
+                        setTimeout(() => {
+                            setSavedQuizzes(prev => [updatedQuiz, ...prev.filter(quiz => quiz._id !== updatedQuiz._id)]);
+                            handleStartQuiz(updatedQuiz);
+                            setProgress(0);
+                            setStep('');
+                            setIsLoading(false);
+                        }, 1000);
+                    } else if (updatedQuiz.status === 'failed') {
+                        clearInterval(pollInterval);
+                        setIsLoading(false);
+                        setError(updatedQuiz.errorDetails || "AI failed to format this quiz data.");
+                    } else if (attempts >= maxAttempts) {
+                        clearInterval(pollInterval);
+                        setIsLoading(false);
+                        setError("Generation took too long. Check 'Saved Quizzes' in a few moments.");
+                    }
+                } catch (pollErr) {
+                    clearInterval(pollInterval);
+                    setIsLoading(false);
+                    setError("Lost connection to status server.");
+                }
+            }, 4000);
+
             return;
-        }
-        
-        const updatedQuiz = await checkRes.json(); // Clean single document parsing
-
-        if (updatedQuiz && updatedQuiz.status === 'completed') {
-            clearInterval(pollInterval);
-            setStep('Quiz generated successfully!');
-            setProgress(100);
-
-            setTimeout(() => {
-                // Fetch the updated list to sync state cleanly
-                fetch(`${backendUrl}`, { headers })
-                    .then(res => res.json())
-                    .then(data => setSavedQuizzes(data || []));
-
-                handleStartQuiz(updatedQuiz);
-                setProgress(0);
-                setStep('');
-                setIsLoading(false); 
-            }, 1000);
-        } else if (updatedQuiz && updatedQuiz.status === 'failed') {
-            clearInterval(pollInterval);
-            setIsLoading(false);
-            setError(updatedQuiz.errorDetails || "AI failed to format this quiz data.");
-        } else if (attempts >= maxAttempts) {
-            clearInterval(pollInterval);
-            setIsLoading(false);
-            setError("Generation took too long. Check 'Saved Quizzes' in a few moments.");
-        } else {
-            setStep(`AI is writing your questions (${Math.min(70 + attempts * 2, 95)}%)...`);
-        }
-    } catch (pollErr) {
-        clearInterval(pollInterval);
-        setIsLoading(false);
-        setError("Lost connection to status server.");
-    }
-}, 4000);
-
-return;
         } catch (err) {
             console.error('Quiz generation error:', err);
             if (err.message.includes('authentication')) {
@@ -265,7 +259,9 @@ return;
                 setError(err.message || "An unexpected error occurred.");
             }
         } finally {
-            setIsLoading(false);
+            if (!startedPolling) {
+                setIsLoading(false);
+            }
         }
     };
 

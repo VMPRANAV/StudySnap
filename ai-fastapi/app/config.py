@@ -32,6 +32,9 @@ class Settings:
 
     vector_index_name: str
     http_timeout_s: float
+    embedding_concurrency: int
+    embedding_max_retries: int
+    embedding_retry_base_ms: int
 
 
 def load_settings() -> Settings:
@@ -49,6 +52,9 @@ def load_settings() -> Settings:
         embedding_dimensions=int(os.getenv("EMBEDDING_DIMENSIONS", "768")),
         vector_index_name=os.getenv("VECTOR_INDEX_NAME", "vector_index"),
         http_timeout_s=float(os.getenv("HTTP_TIMEOUT_S", "60")),
+        embedding_concurrency=int(os.getenv("EMBEDDING_CONCURRENCY", "4")),
+        embedding_max_retries=int(os.getenv("EMBEDDING_MAX_RETRIES", "4")),
+        embedding_retry_base_ms=int(os.getenv("EMBEDDING_RETRY_BASE_MS", "800")),
     )
 
 

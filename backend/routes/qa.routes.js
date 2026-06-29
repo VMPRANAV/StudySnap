@@ -14,6 +14,7 @@ router.post('/upload', protect, upload.single('file'), qaController.processPdfFo
 router.post('/generate', protect, qaController.generateQaSet);
 
 router.get('/', protect, qaController.getQaSets);
+router.get('/:id', protect, qaController.getQaSetById);
 
 
 router.get('/:id/pdf', protect, qaController.generateQaPdf);
