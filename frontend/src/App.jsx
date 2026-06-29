@@ -47,6 +47,7 @@ const App = () => {
     const [user, setUser] = useState(null);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+    const backendUrl = import.meta.env.VITE_URL || 'http://localhost:3000';
 
     // Check for existing authentication on app load
     useEffect(() => {
@@ -71,6 +72,35 @@ const App = () => {
         setUser(userData);
         setIsAuthenticated(true);
     };
+
+    useEffect(() => {
+        if (!isAuthenticated) {
+            return undefined;
+        }
+
+        const warmAiService = async () => {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                return;
+            }
+
+            try {
+                await fetch(`${backendUrl}/api/auth/ai-warmup`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                    },
+                });
+            } catch (error) {
+                console.error('AI warmup ping failed:', error);
+            }
+        };
+
+        warmAiService();
+        const intervalId = window.setInterval(warmAiService, 10 * 60 * 1000);
+
+        return () => window.clearInterval(intervalId);
+    }, [isAuthenticated, backendUrl]);
 
     const handleLogout = async () => {
         try {
@@ -198,4 +228,3 @@ const App = () => {
 };
 
 export default App;
-

@@ -132,3 +132,20 @@ exports.login = async (req, res) => {
     res.status(500).json({ message: 'Server error during login.' });
   }
 };
+
+exports.warmAi = async (req, res) => {
+  try {
+    const result = await warmAiService();
+    res.status(200).json({
+      ok: true,
+      ai: result,
+      warmedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('AI warmup request failed:', error);
+    res.status(503).json({
+      ok: false,
+      message: error.message || 'AI warmup failed.',
+    });
+  }
+};
