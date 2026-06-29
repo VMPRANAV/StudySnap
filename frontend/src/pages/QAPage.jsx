@@ -572,6 +572,7 @@ const ErrorDisplay = ({ error }) => (
         </div>
     </motion.div>
 );
+// backend/pages/QAPage.jsx -> Find SavedQaSetList and update it:
 
 const SavedQaSetList = ({ sets, onStartReview }) => {
     if (!sets || !sets.length) {
@@ -583,35 +584,47 @@ const SavedQaSetList = ({ sets, onStartReview }) => {
             </div>
         );
     }
-
     return (
         <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
-            {sets.map((set, index) => (
-                <motion.button 
-                    key={set._id} 
-                    onClick={() => onStartReview(set)}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                    className="w-full text-left p-5 rounded-xl bg-gradient-to-r from-white/5 to-white/10 hover:from-white/10 hover:to-white/20 transition-all duration-300 flex items-center justify-between group border border-white/5 hover:border-white/20"
-                    whileHover={{ scale: 1.02 }}
-                >
-                    <div className="flex items-center gap-4 overflow-hidden">
-                        <div className="p-3 rounded-lg bg-gradient-to-br from-purple-500/20 to-pink-500/20">
-                            <QuestionMarkCircleIcon className="h-8 w-8 text-purple-400" />
+            {sets.map((set, index) => {
+                const isPending = set.status === 'pending';
+
+                return (
+                    <motion.button 
+                        key={set._id} 
+                        onClick={() => !isPending && onStartReview(set)}
+                        disabled={isPending}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: index * 0.1 }}
+                        className={`w-full text-left p-5 rounded-xl flex items-center justify-between group border transition-all duration-300 ${
+                            isPending 
+                                ? 'bg-slate-800/40 border-white/5 opacity-50 cursor-not-allowed' 
+                                : 'bg-gradient-to-r from-white/5 to-white/10 hover:from-white/10 hover:to-white/20 border-white/5 hover:border-white/20'
+                        }`}
+                        whileHover={isPending ? {} : { scale: 1.02 }}
+                    >
+                        <div className="flex items-center gap-4 overflow-hidden">
+                            <div className="p-3 rounded-lg bg-gradient-to-br from-purple-500/20 to-pink-500/20">
+                                <QuestionMarkCircleIcon className="h-8 w-8 text-purple-400" />
+                            </div>
+                            <div className="overflow-hidden">
+                                <p className={`font-semibold text-lg truncate ${isPending ? 'text-slate-400' : 'text-white group-hover:text-purple-200'} transition-colors`}>
+                                    {set.topic}
+                                </p>
+                                <p className="text-sm text-slate-400 mt-1">
+                                    {new Date(set.createdAt).toLocaleDateString()} • {isPending ? 'Processing...' : `${set.questions?.length || 0} questions`}
+                                </p>
+                            </div>
                         </div>
-                        <div className="overflow-hidden">
-                            <p className="font-semibold text-lg truncate text-white group-hover:text-purple-200 transition-colors">
-                                {set.topic}
-                            </p>
-                            <p className="text-sm text-slate-400 mt-1">
-                                {new Date(set.createdAt).toLocaleDateString()} • {set.questions?.length || 0} questions
-                            </p>
-                        </div>
-                    </div>
-                    <ChevronRightIcon className="h-6 w-6 text-slate-500 group-hover:text-purple-400 transition-colors"/>
-                </motion.button>
-            ))}
+                        {isPending ? (
+                            <div className="w-5 h-5 border-2 border-t-transparent border-purple-400 rounded-full animate-spin flex-shrink-0" />
+                        ) : (
+                            <ChevronRightIcon className="h-6 w-6 text-slate-500 group-hover:text-purple-400 transition-colors"/>
+                        )}
+                    </motion.button>
+                );
+            })}
         </div>
     );
 };
