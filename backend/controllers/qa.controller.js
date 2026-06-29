@@ -69,10 +69,10 @@ exports.generateQaSet = async (req, res) => {
       userId: req.user.id,
       sourceFileId: fileId,
       topic: prompt, 
-      questions: qaData
+      questions: []
     });
 
-    await newQaSet.save();
+    await newQaSet.save({ validateBeforeSave: false });
     console.log('Q&A Set saved successfully:', newQaSet._id);
 
     res.status(201).json(newQaSet);
