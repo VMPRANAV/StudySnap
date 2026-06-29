@@ -276,19 +276,59 @@ const QaPage = ({ isSidebarOpen }) => {
                 const errData = await genRes.json();
                 throw new Error(`Q&A generation failed: ${errData.message}`);
             }
-            
-            const newQaSet = await genRes.json();
-            
-            // Step 3: Complete
+            const initiationData = await genRes.json();
+const qaId = initiationData._id;
+
+setStep('AI is compiling comprehensive answers (0%)...');
+setProgress(70);
+
+let attempts = 0;
+const maxAttempts = 35; // Extra padding for deep processing on 14-mark variants
+
+const pollInterval = setInterval(async () => {
+    attempts++;
+    try {
+        const checkRes = await fetch(backendUrl, { headers: getAuthHeaders() });
+        if (handleAuthError(checkRes)) {
+            clearInterval(pollInterval);
+            return;
+        }
+        
+        const currentSets = await checkRes.json();
+        const updatedSet = currentSets.find(s => s._id === qaId);
+
+        if (updatedSet && updatedSet.status === 'completed') {
+            clearInterval(pollInterval);
             setStep('Q&A set generated successfully!');
             setProgress(100);
-            
+
             setTimeout(() => {
-                setSavedQaSets(prev => [newQaSet, ...prev]);
-                handleStartReview(newQaSet);
+                setSavedQaSets(currentSets);
+                handleStartReview(updatedSet);
                 setProgress(0);
                 setStep('');
+                setIsLoading(false);
             }, 1000);
+        } else if (updatedSet && updatedSet.status === 'failed') {
+            clearInterval(pollInterval);
+            setIsLoading(false);
+            setError(updatedSet.errorDetails || "AI failed to build this exam layout.");
+        } else if (attempts >= maxAttempts) {
+            clearInterval(pollInterval);
+            setIsLoading(false);
+            setError("The operation timed out. Please try a simpler mark allocation distribution.");
+        } else {
+            setStep(`AI is drafting test items (${Math.min(70 + attempts * 2, 95)}%)...`);
+        }
+    } catch (pollErr) {
+        clearInterval(pollInterval);
+        setIsLoading(false);
+        setError("Network error evaluating task lifecycle updates.");
+    }
+}, 4000);
+
+return;
+            
 
         } catch (err) {
             console.error('Q&A generation error:', err);
