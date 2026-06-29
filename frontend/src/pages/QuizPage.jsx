@@ -200,27 +200,27 @@ const backend=import.meta.env.VITE_URL||'http://localhost:3000'
             }
             
             const newQuiz = await genRes.json();
-
             const initiationData = await genRes.json();
-const quizId = initiationData._id; // Get the temporary MongoDB Document ID
+const quizId = initiationData._id; 
 
 setStep('AI is crafting your questions (0%)...');
 setProgress(70);
 
 let attempts = 0;
-const maxAttempts = 30; // 2 minutes max ceiling
+const maxAttempts = 30; 
 
 const pollInterval = setInterval(async () => {
     attempts++;
     try {
-        const checkRes = await fetch(`${backendUrl}`, { headers });
+        // FIXED: Explicitly target the individual quiz record ID endpoint
+        const checkRes = await fetch(`${backendUrl}/${quizId}`, { headers }); 
         if (handleAuthError(checkRes)) {
             clearInterval(pollInterval);
+            setIsLoading(false);
             return;
         }
         
-        const currentQuizzes = await checkRes.json();
-        const updatedQuiz = currentQuizzes.find(q => q._id === quizId);
+        const updatedQuiz = await checkRes.json(); // Clean single document parsing
 
         if (updatedQuiz && updatedQuiz.status === 'completed') {
             clearInterval(pollInterval);
@@ -228,11 +228,15 @@ const pollInterval = setInterval(async () => {
             setProgress(100);
 
             setTimeout(() => {
-                setSavedQuizzes(currentQuizzes);
+                // Fetch the updated list to sync state cleanly
+                fetch(`${backendUrl}`, { headers })
+                    .then(res => res.json())
+                    .then(data => setSavedQuizzes(data || []));
+
                 handleStartQuiz(updatedQuiz);
                 setProgress(0);
                 setStep('');
-                setIsLoading(false);
+                setIsLoading(false); 
             }, 1000);
         } else if (updatedQuiz && updatedQuiz.status === 'failed') {
             clearInterval(pollInterval);
@@ -243,7 +247,6 @@ const pollInterval = setInterval(async () => {
             setIsLoading(false);
             setError("Generation took too long. Check 'Saved Quizzes' in a few moments.");
         } else {
-
             setStep(`AI is writing your questions (${Math.min(70 + attempts * 2, 95)}%)...`);
         }
     } catch (pollErr) {
@@ -253,6 +256,7 @@ const pollInterval = setInterval(async () => {
     }
 }, 4000);
 
+return;
         } catch (err) {
             console.error('Quiz generation error:', err);
             if (err.message.includes('authentication')) {
