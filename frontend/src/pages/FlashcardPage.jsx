@@ -303,20 +303,61 @@ const handleDragLeave = (e) => {
                 return;
             }
             // --- End error handling ---
+const initiationData = await genRes.json();
+const setId = initiationData._id;
 
-            const newSet = await genRes.json();
-            
+setCurrentStep('AI is writing definitions (0%)...');
+setUploadProgress(70);
+
+let attempts = 0;
+const maxAttempts = 30;
+
+const pollInterval = setInterval(async () => {
+    attempts++;
+    try {
+        const checkRes = await fetch(backendUrl, { headers: getAuthHeaders() });
+        if (handleAuthError(checkRes)) {
+            clearInterval(pollInterval);
+            return;
+        }
+        
+        const currentSets = await checkRes.json();
+        const updatedSet = currentSets.find(s => s._id === setId);
+
+        if (updatedSet && updatedSet.status === 'completed') {
+            clearInterval(pollInterval);
             setCurrentStep('Flashcards generated successfully!');
             setUploadProgress(100);
-            
+
             setTimeout(() => {
-                setFlashcards(newSet.flashcards);
-                setSavedSets(prev => [newSet, ...prev]);
+                setFlashcards(updatedSet.flashcards);
+                setSavedSets(currentSets);
                 setCurrentIndex(0);
                 setView('viewer');
                 setUploadProgress(0);
                 setCurrentStep('');
+                setIsLoading(false);
             }, 1000);
+        } else if (updatedSet && updatedSet.status === 'failed') {
+            clearInterval(pollInterval);
+            setIsLoading(false);
+            setError(updatedSet.errorDetails || "AI failed to format this dataset.");
+        } else if (attempts >= maxAttempts) {
+            clearInterval(pollInterval);
+            setIsLoading(false);
+            setError("Generation timed out. Check your collection list shortly.");
+        } else {
+            setCurrentStep(`AI is analyzing concepts (${Math.min(70 + attempts * 2, 95)}%)...`);
+        }
+    } catch (pollErr) {
+        clearInterval(pollInterval);
+        setIsLoading(false);
+        setError("Error pulling status verification data.");
+    }
+}, 4000);
+
+return;
+
 
         } catch (err) {
             console.error('Generation error:', err);
