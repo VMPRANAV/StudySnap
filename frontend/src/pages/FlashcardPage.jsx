@@ -619,6 +619,10 @@ return;
 };
 
 // --- Enhanced Sub-Components (unchanged) ---
+
+    
+// backend/pages/FlashcardPage.jsx -> Find SavedSetsList and update it:
+
 const SavedSetsList = ({ sets, onLoad }) => {
     if (sets.length === 0) {
         return (
@@ -629,35 +633,48 @@ const SavedSetsList = ({ sets, onLoad }) => {
             </div>
         );
     }
-    
+         
     return (
         <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-            {sets.map((set, index) => (
-                <motion.button 
-                    key={set._id} 
-                    onClick={() => onLoad(set)}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                    className="w-full text-left p-5 rounded-xl bg-gradient-to-r from-white/5 to-white/10 hover:from-white/10 hover:to-white/20 transition-all duration-300 flex items-center justify-between group border border-white/5 hover:border-white/20"
-                    whileHover={{ scale: 1.02 }}
-                >
-                    <div className="flex items-center gap-4 overflow-hidden">
-                        <div className="p-3 rounded-lg bg-gradient-to-br from-cyan-500/20 to-purple-500/20">
-                            <BookOpenIcon className="h-8 w-8 text-cyan-400" />
+            {sets.map((set, index) => {
+                const isPending = set.status === 'pending';
+
+                return (
+                    <motion.button 
+                        key={set._id} 
+                        onClick={() => !isPending && onLoad(set)}
+                        disabled={isPending}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: index * 0.1 }}
+                        className={`w-full text-left p-5 rounded-xl flex items-center justify-between group border transition-all duration-300 ${
+                            isPending 
+                                ? 'bg-slate-800/40 border-white/5 opacity-50 cursor-not-allowed' 
+                                : 'bg-gradient-to-r from-white/5 to-white/10 hover:from-white/10 hover:to-white/20 border-white/5 hover:border-white/20'
+                        }`}
+                        whileHover={isPending ? {} : { scale: 1.02 }}
+                    >
+                        <div className="flex items-center gap-4 overflow-hidden">
+                            <div className="p-3 rounded-lg bg-gradient-to-br from-cyan-500/20 to-purple-500/20">
+                                <BookOpenIcon className="h-8 w-8 text-cyan-400" />
+                            </div>
+                            <div className="overflow-hidden">
+                                <p className={`font-semibold text-lg truncate ${isPending ? 'text-slate-400' : 'text-white group-hover:text-cyan-200'} transition-colors`}>
+                                    {set.topic}
+                                </p>
+                                <p className="text-sm text-slate-400 mt-1">
+                                    {new Date(set.createdAt).toLocaleDateString()} • {isPending ? 'Processing...' : `${set.flashcards?.length || 0} cards`}
+                                </p>
+                            </div>
                         </div>
-                        <div className="overflow-hidden">
-                            <p className="font-semibold text-lg truncate text-white group-hover:text-cyan-200 transition-colors">
-                                {set.topic}
-                            </p>
-                            <p className="text-sm text-slate-400 mt-1">
-                                {new Date(set.createdAt).toLocaleDateString()} • {set.flashcards?.length || 0} cards
-                            </p>
-                        </div>
-                    </div>
-                    <ChevronRightIcon className="h-6 w-6 text-slate-500 group-hover:text-cyan-400 transition-colors"/>
-                </motion.button>
-            ))}
+                        {isPending ? (
+                            <div className="w-5 h-5 border-2 border-t-transparent border-cyan-400 rounded-full animate-spin flex-shrink-0" />
+                        ) : (
+                            <ChevronRightIcon className="h-6 w-6 text-slate-500 group-hover:text-cyan-400 transition-colors"/>
+                        )}
+                    </motion.button>
+                );
+            })}
         </div>
     );
 };
