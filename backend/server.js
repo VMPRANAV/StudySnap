@@ -48,12 +48,37 @@ app.use((req, res) => {
   res.sendFile(path.join(__dirname, '../frontend/build/index.html'));
 });
 
+// --- Keep-alive pinger to prevent Render free-tier cold starts ---
+// Render spins down idle services after ~15 minutes. When both backend and
+// FastAPI wake up simultaneously, all queued requests hit Groq at once → 429s.
+// Pinging every 14 minutes keeps both services warm and eliminates the problem.
+const KEEP_ALIVE_INTERVAL_MS = 14 * 60 * 1000; // 14 minutes
+
+function startKeepAlivePinger() {
+  if (process.env.NODE_ENV !== 'production') return;
+  const fastApiUrl = process.env.FASTAPI_AI_URL;
+  if (!fastApiUrl) return;
+
+  const pingUrl = new URL('/health', fastApiUrl).toString();
+  setInterval(async () => {
+    try {
+      const res = await fetch(pingUrl, { signal: AbortSignal.timeout(10_000) });
+      console.log(`[KeepAlive] FastAPI ping → ${res.status}`);
+    } catch (err) {
+      console.warn(`[KeepAlive] FastAPI ping failed: ${err.message}`);
+    }
+  }, KEEP_ALIVE_INTERVAL_MS);
+
+  console.log(`[KeepAlive] Pinging FastAPI every ${KEEP_ALIVE_INTERVAL_MS / 60000} min to prevent cold starts`);
+}
+
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => {
     console.log('Successfully connected to MongoDB.');
     // The server will only start listening for requests after the database connection is established.
     app.listen(PORT, () => {
       console.log(`Server is live and listening on http://localhost:${PORT}`);
+      startKeepAlivePinger();
     });
   })
   .catch(err => {
