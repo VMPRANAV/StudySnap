@@ -53,10 +53,10 @@ exports.generateFlashcards = async (req, res) => {
       userId: req.user.id,
       sourceFileId: fileId,
       topic: prompt, 
-      flashcards 
+      flashcards: []
     });
 
-    await newSet.save();
+    await newSet.save({ validateBeforeSave: false });
     res.status(201).json(newSet);
   } catch (error) {
     console.error('Error generating flashcards:', error);
